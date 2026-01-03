@@ -278,11 +278,28 @@ draft_board = draft_board.sort_values('Strategy_Score', ascending=False)
 draft_board['Rank'] = range(1, len(draft_board) + 1)
 
 # =============================================================================
+# CALCULATE SALARY VALUE
+# =============================================================================
+
+# Salary in millions for display
+draft_board['Salary_M'] = draft_board['Salary_2026'] / 1_000_000
+
+# $ per Strategy Score point (lower = better value)
+# Only calculate for players with salary and positive score
+draft_board['Dollar_Per_Score'] = draft_board.apply(
+    lambda row: row['Salary_M'] / row['Strategy_Score']
+    if pd.notna(row['Salary_M']) and row['Strategy_Score'] > 0 else None,
+    axis=1
+)
+
+# =============================================================================
 # EXPORT CSV
 # =============================================================================
 
 output_cols = [
     'Rank', 'Name', 'Team', 'Player_Type', 'Position',
+    # Salary
+    'Salary_M', 'Dollar_Per_Score', 'Rostered_By',
     # Batter stats
     'HR', 'R', 'RBI', 'SB', 'AVG', 'OBP', 'SLG',
     # Pitcher stats
@@ -292,7 +309,7 @@ output_cols = [
     # Z-scores
     'z_HR', 'z_R', 'z_RBI', 'z_QS', 'z_K', 'z_ERA', 'z_WHIP',
     # Block info
-    'Block_Type', 'Blocking_Franchise', 'Rostered_By',
+    'Block_Type', 'Blocking_Franchise',
     # Tier
     'Tier'
 ]
@@ -314,9 +331,9 @@ print("=" * 80)
 print(f"{STRATEGY['description']}")
 
 # Top 25 Batters
-print("\n" + "=" * 80)
+print("\n" + "=" * 100)
 print("TOP 25 BATTERS BY STRATEGY SCORE")
-print("=" * 80)
+print("=" * 100)
 top_batters = draft_board[draft_board['Player_Type'] == 'Batter'].head(25)
 for _, row in top_batters.iterrows():
     block = f"[PARTIAL]" if row['Block_Type'] == 'Partial' else ""
@@ -324,13 +341,15 @@ for _, row in top_batters.iterrows():
     hr = row['HR'] if pd.notna(row['HR']) else 0
     r = row['R'] if pd.notna(row['R']) else 0
     rbi = row['RBI'] if pd.notna(row['RBI']) else 0
-    print(f"{row['Rank']:4}. {row['Name']:<25} HR:{hr:>5.0f} R:{r:>5.0f} RBI:{rbi:>5.0f} "
-          f"Score:{row['Strategy_Score']:>6.2f} {block} {rostered}")
+    sal = f"${row['Salary_M']:.1f}M" if pd.notna(row['Salary_M']) else "FA"
+    dps = f"${row['Dollar_Per_Score']:.2f}/pt" if pd.notna(row['Dollar_Per_Score']) else ""
+    print(f"{row['Rank']:4}. {row['Name']:<22} {sal:>8} Score:{row['Strategy_Score']:>5.2f} {dps:>10} "
+          f"HR:{hr:>3.0f} R:{r:>3.0f} RBI:{rbi:>3.0f} {block} {rostered}")
 
 # Top 25 Pitchers
-print("\n" + "=" * 80)
+print("\n" + "=" * 100)
 print("TOP 25 PITCHERS BY STRATEGY SCORE (Starting Pitchers)")
-print("=" * 80)
+print("=" * 100)
 top_pitchers = draft_board[(draft_board['Player_Type'] == 'Pitcher') & (draft_board['Position'] == 'SP')].head(25)
 for _, row in top_pitchers.iterrows():
     block = f"[PARTIAL]" if row['Block_Type'] == 'Partial' else ""
@@ -338,29 +357,33 @@ for _, row in top_pitchers.iterrows():
     qs = row['QS'] if pd.notna(row['QS']) else 0
     k = row['SO'] if pd.notna(row['SO']) else 0
     era = row['ERA'] if pd.notna(row['ERA']) else 0
-    print(f"{row['Rank']:4}. {row['Name']:<25} QS:{qs:>5.0f} K:{k:>5.0f} ERA:{era:>5.2f} "
-          f"Score:{row['Strategy_Score']:>6.2f} {block} {rostered}")
+    sal = f"${row['Salary_M']:.1f}M" if pd.notna(row['Salary_M']) else "FA"
+    dps = f"${row['Dollar_Per_Score']:.2f}/pt" if pd.notna(row['Dollar_Per_Score']) else ""
+    print(f"{row['Rank']:4}. {row['Name']:<22} {sal:>8} Score:{row['Strategy_Score']:>5.2f} {dps:>10} "
+          f"QS:{qs:>3.0f} K:{k:>3.0f} ERA:{era:>4.2f} {block} {rostered}")
 
 # Best FPTS Value (high Strategy Score relative to raw FPTS)
-print("\n" + "=" * 80)
+print("\n" + "=" * 100)
 print("STRATEGY SCORE LEADERS (Pure Projection Value)")
-print("=" * 80)
+print("=" * 100)
 top_overall = draft_board.nlargest(20, 'Strategy_Score')
 for _, row in top_overall.iterrows():
     block = f"[PARTIAL]" if row['Block_Type'] == 'Partial' else ""
     rostered = f"({row['Rostered_By']})" if pd.notna(row['Rostered_By']) else "(FA)"
     fpts = row['FPTS'] if pd.notna(row['FPTS']) else 0
-    print(f"{row['Rank']:4}. {row['Name']:<25} {row['Player_Type']:<7} "
-          f"FPTS:{fpts:>6.0f} Score:{row['Strategy_Score']:>6.2f} {block} {rostered}")
+    sal = f"${row['Salary_M']:.1f}M" if pd.notna(row['Salary_M']) else "FA"
+    dps = f"${row['Dollar_Per_Score']:.2f}/pt" if pd.notna(row['Dollar_Per_Score']) else ""
+    print(f"{row['Rank']:4}. {row['Name']:<22} {row['Player_Type']:<7} {sal:>8} Score:{row['Strategy_Score']:>5.2f} {dps:>10} {block} {rostered}")
 
 # Partial Block Targets Worth Monitoring
-print("\n" + "=" * 80)
+print("\n" + "=" * 100)
 print("PARTIAL BLOCK TARGETS WORTH MONITORING")
-print("=" * 80)
+print("=" * 100)
 partial_blocks = draft_board[draft_board['Block_Type'] == 'Partial'].nlargest(15, 'Strategy_Score')
 for _, row in partial_blocks.iterrows():
-    print(f"{row['Name']:<25} {row['Player_Type']:<7} Score:{row['Strategy_Score']:>6.2f} "
-          f"Blocker: {row['Blocking_Franchise']}")
+    sal = f"${row['Salary_M']:.1f}M" if pd.notna(row['Salary_M']) else "FA"
+    dps = f"${row['Dollar_Per_Score']:.2f}/pt" if pd.notna(row['Dollar_Per_Score']) else ""
+    print(f"{row['Name']:<22} {row['Player_Type']:<7} {sal:>8} Score:{row['Strategy_Score']:>5.2f} {dps:>10} Blocker: {row['Blocking_Franchise']}")
 
 # Tier Distribution
 print("\n" + "=" * 80)
