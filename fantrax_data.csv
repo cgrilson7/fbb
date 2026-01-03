@@ -1,0 +1,169 @@
+Team,Category,Value,Rank,Points
+Tyler & Dustin,R,1199,1,12
+E.T. Phone Holmes,R,1108,2,11
+Ross & Jack,R,1071,3,10
+J.D. Barnett,R,1033,4,9
+Zack,R,963,5,8
+Nick & Alex,R,940,6,7
+Steve Cornish,R,881,7,6
+Jake & Johnny,R,875,8,5
+Brian Frederick,R,851,9,4
+Brenden,R,846,10,3
+Ethan Gobetz,R,783,11,2
+Nolan,R,723,12,1
+Tyler & Dustin,HR,364,1,12
+E.T. Phone Holmes,HR,354,2,11
+J.D. Barnett,HR,322,3,10
+Nick & Alex,HR,280,4,9
+Ross & Jack,HR,277,5,8
+Zack,HR,269,6,7
+Jake & Johnny,HR,264,7,6
+Ethan Gobetz,HR,237,8,5
+Brian Frederick,HR,222,9,3.5
+Nolan,HR,222,9,3.5
+Brenden,HR,206,11,2
+Steve Cornish,HR,204,12,1
+Tyler & Dustin,RBI,1097,1,12
+E.T. Phone Holmes,RBI,1062,2,11
+J.D. Barnett,RBI,1022,3,10
+Nick & Alex,RBI,1002,4,9
+Ross & Jack,RBI,961,5,8
+Zack,RBI,956,6,7
+Jake & Johnny,RBI,948,7,6
+Brian Frederick,RBI,833,8,5
+Steve Cornish,RBI,796,9,4
+Ethan Gobetz,RBI,784,10,3
+Brenden,RBI,748,11,2
+Nolan,RBI,737,12,1
+Brenden,SB,241,1,12
+Ross & Jack,SB,240,2,11
+J.D. Barnett,SB,189,3,10
+Steve Cornish,SB,180,4,9
+E.T. Phone Holmes,SB,175,5,8
+Tyler & Dustin,SB,169,6,7
+Jake & Johnny,SB,157,7,6
+Zack,SB,143,8,5
+Nolan,SB,133,9,4
+Brian Frederick,SB,106,10,3
+Nick & Alex,SB,103,11,2
+Ethan Gobetz,SB,46,12,1
+Zack,AVG,0.268,1,12
+Nick & Alex,AVG,0.264,2,11
+Ross & Jack,AVG,0.262,3,10
+Tyler & Dustin,AVG,0.257,4,9
+E.T. Phone Holmes,AVG,0.255,5,8
+Brian Frederick,AVG,0.254,6,7
+Brenden,AVG,0.252,7,6
+J.D. Barnett,AVG,0.252,8,5
+Ethan Gobetz,AVG,0.251,9,4
+Steve Cornish,AVG,0.251,10,3
+Jake & Johnny,AVG,0.245,11,2
+Nolan,AVG,0.242,12,1
+Ross & Jack,OBP,0.343,1,12
+Zack,OBP,0.338,2,11
+Nick & Alex,OBP,0.334,3,10
+Brian Frederick,OBP,0.332,4,9
+Tyler & Dustin,OBP,0.332,5,8
+E.T. Phone Holmes,OBP,0.331,6,7
+J.D. Barnett,OBP,0.326,7,6
+Ethan Gobetz,OBP,0.325,8,5
+Steve Cornish,OBP,0.321,9,4
+Brenden,OBP,0.321,10,3
+Nolan,OBP,0.318,11,2
+Jake & Johnny,OBP,0.316,12,1
+Tyler & Dustin,SLG,0.457,1,12
+E.T. Phone Holmes,SLG,0.451,2,11
+Nick & Alex,SLG,0.449,3,10
+J.D. Barnett,SLG,0.445,4,9
+Zack,SLG,0.437,5,8
+Ethan Gobetz,SLG,0.436,6,7
+Ross & Jack,SLG,0.433,7,6
+Jake & Johnny,SLG,0.426,8,5
+Nolan,SLG,0.419,9,4
+Brian Frederick,SLG,0.411,10,3
+Brenden,SLG,0.409,11,2
+Steve Cornish,SLG,0.401,12,1
+Zack,QS,121,1,12
+Ross & Jack,QS,117,2,11
+E.T. Phone Holmes,QS,106,3,10
+Jake & Johnny,QS,97,4,9
+Brenden,QS,93,5,7.5
+Brian Frederick,QS,93,5,7.5
+J.D. Barnett,QS,90,7,6
+Nick & Alex,QS,83,8,4.5
+Steve Cornish,QS,83,8,4.5
+Ethan Gobetz,QS,80,10,3
+Tyler & Dustin,QS,73,11,2
+Nolan,QS,60,12,1
+Tyler & Dustin,SV,119,1,12
+J.D. Barnett,SV,103,2,11
+Ethan Gobetz,SV,82,3,10
+Ross & Jack,SV,76,4,9
+Zack,SV,67,5,8
+E.T. Phone Holmes,SV,63,6,7
+Steve Cornish,SV,57,7,6
+Nick & Alex,SV,46,8,5
+Brenden,SV,41,9,4
+Nolan,SV,25,10,3
+Brian Frederick,SV,18,11,2
+Jake & Johnny,SV,8,12,1
+Zack,HLD,84,1,12
+Tyler & Dustin,HLD,70,2,11
+Jake & Johnny,HLD,58,3,10
+Ross & Jack,HLD,57,4,9
+E.T. Phone Holmes,HLD,55,5,8
+Brian Frederick,HLD,48,6,7
+Nolan,HLD,44,7,6
+J.D. Barnett,HLD,43,8,5
+Nick & Alex,HLD,22,9,4
+Brenden,HLD,20,10,3
+Ethan Gobetz,HLD,19,11,2
+Steve Cornish,HLD,11,12,1
+Brian Frederick,BB9,2.37,1,12
+Tyler & Dustin,BB9,2.67,2,11
+Ethan Gobetz,BB9,2.72,3,10
+Jake & Johnny,BB9,2.81,4,9
+Ross & Jack,BB9,2.82,5,8
+J.D. Barnett,BB9,2.88,6,7
+Brenden,BB9,2.92,7,6
+Steve Cornish,BB9,2.99,8,5
+Zack,BB9,3.02,9,4
+Nick & Alex,BB9,3.11,10,3
+E.T. Phone Holmes,BB9,3.17,11,2
+Nolan,BB9,999963.00,12,1
+Zack,K,1870,1,12
+Ross & Jack,K,1766,2,11
+E.T. Phone Holmes,K,1686,3,10
+J.D. Barnett,K,1581,4,9
+Jake & Johnny,K,1467,5,8
+Nick & Alex,K,1354,6,7
+Brenden,K,1343,7,6
+Tyler & Dustin,K,1322,8,5
+Brian Frederick,K,1193,9,4
+Ethan Gobetz,K,1192,10,3
+Steve Cornish,K,1186,11,2
+Nolan,K,925,12,1
+Tyler & Dustin,ERA,3.39,1,12
+Jake & Johnny,ERA,3.57,2,11
+Zack,ERA,3.73,3,10
+Nick & Alex,ERA,3.75,4,9
+Ross & Jack,ERA,3.79,5,8
+Brian Frederick,ERA,3.86,6,7
+Brenden,ERA,3.87,7,6
+E.T. Phone Holmes,ERA,3.94,8,5
+Ethan Gobetz,ERA,3.94,9,4
+J.D. Barnett,ERA,3.96,10,3
+Steve Cornish,ERA,3.98,11,2
+Nolan,ERA,999963.00,12,1
+Tyler & Dustin,WHIP,0.82,1,12
+Nick & Alex,WHIP,0.84,2,11
+Zack,WHIP,0.85,3,10
+Brenden,WHIP,0.88,4,9
+Ethan Gobetz,WHIP,0.88,5,8
+Ross & Jack,WHIP,0.88,6,7
+Jake & Johnny,WHIP,0.88,7,6
+J.D. Barnett,WHIP,0.91,8,5
+E.T. Phone Holmes,WHIP,0.91,9,4
+Steve Cornish,WHIP,0.95,10,3
+Brian Frederick,WHIP,0.96,11,2
+Nolan,WHIP,999963.00,12,1
