@@ -159,12 +159,16 @@ def generate_html(data):
                         class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
                 </div>
                 <label class="flex items-center space-x-2 cursor-pointer">
-                    <input type="checkbox" x-model="showFAOnly" class="rounded text-blue-600 focus:ring-blue-500">
-                    <span class="text-sm text-gray-700">Free Agents Only</span>
+                    <input type="checkbox" x-model="hideFreeAgents" class="rounded text-blue-600 focus:ring-blue-500">
+                    <span class="text-sm text-gray-700">Hide Free Agents</span>
                 </label>
                 <label class="flex items-center space-x-2 cursor-pointer">
                     <input type="checkbox" x-model="hidePartialBlocks" class="rounded text-blue-600 focus:ring-blue-500">
                     <span class="text-sm text-gray-700">Hide Partial Blocks</span>
+                </label>
+                <label class="flex items-center space-x-2 cursor-pointer">
+                    <input type="checkbox" x-model="showFAOnly" class="rounded text-blue-600 focus:ring-blue-500">
+                    <span class="text-sm text-gray-700">Free Agents Only</span>
                 </label>
             </div>
 
@@ -318,6 +322,7 @@ def generate_html(data):
                 activeStrategy: 'volume_power',
                 searchQuery: '',
                 showFAOnly: false,
+                hideFreeAgents: true,
                 hidePartialBlocks: false,
                 sortColumn: 'Rank',
                 sortDirection: 'asc',
@@ -339,6 +344,9 @@ def generate_html(data):
                             return false;
                         }
                         if (this.showFAOnly && p.Rostered_By) {
+                            return false;
+                        }
+                        if (this.hideFreeAgents && !p.Rostered_By) {
                             return false;
                         }
                         if (this.hidePartialBlocks && p.Block_Type === 'Partial') {
