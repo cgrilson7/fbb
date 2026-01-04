@@ -54,7 +54,7 @@ projections = projections.merge(
 # Left join roster/contract info
 roster_cols = ['name_norm', 'Franchise', 'Contract Type', 'Salary',
                'Contract Length', 'Contract Starts', 'Contract Ends',
-               '2025 Salary Hit', '2026 Salary Hit']
+               '2025 Salary Hit', '2026 Salary Hit', '2027 Salary Hit', '2028 Salary Hit']
 projections = projections.merge(
     rosters[roster_cols],
     on='name_norm',
@@ -79,6 +79,8 @@ def clean_salary(val):
 projections['Salary_Clean'] = projections['Salary'].apply(clean_salary)
 projections['Salary_2025'] = projections['2025 Salary Hit'].apply(clean_salary)
 projections['Salary_2026'] = projections['2026 Salary Hit'].apply(clean_salary)
+projections['Salary_2027'] = projections['2027 Salary Hit'].apply(clean_salary)
+projections['Salary_2028'] = projections['2028 Salary Hit'].apply(clean_salary)
 
 # Calculate counting stats
 # Batters: HR + R + RBI + SB

@@ -60,12 +60,14 @@ def load_strategy_data():
         df = pd.read_csv(info['file'])
 
         # Select columns for batters
-        batter_cols = ['Rank', 'Name', 'Team', 'Salary_M', 'Strategy_Score', 'Dollar_Per_Score',
+        batter_cols = ['Rank', 'Name', 'Team', 'Salary_2026_M', 'Salary_2027_M', 'Salary_2028_M',
+                       'Strategy_Score', 'Dollar_Per_Score',
                        'HR', 'R', 'RBI', 'SB', 'AVG', 'OBP', 'SLG', 'Block_Type', 'Rostered_By']
         batters = df[df['Player_Type'] == 'Batter'][batter_cols].head(50)
 
         # Select columns for pitchers
-        pitcher_cols = ['Rank', 'Name', 'Team', 'Position', 'Salary_M', 'Strategy_Score', 'Dollar_Per_Score',
+        pitcher_cols = ['Rank', 'Name', 'Team', 'Position', 'Salary_2026_M', 'Salary_2027_M', 'Salary_2028_M',
+                        'Strategy_Score', 'Dollar_Per_Score',
                         'QS', 'SO', 'SV', 'HLD', 'ERA', 'WHIP', 'Block_Type', 'Rostered_By']
         pitchers = df[df['Player_Type'] == 'Pitcher'][pitcher_cols].head(50)
 
@@ -74,7 +76,7 @@ def load_strategy_data():
         pitchers = pitchers.fillna('')
 
         # Round numeric columns
-        for col in ['Salary_M', 'Strategy_Score', 'Dollar_Per_Score', 'AVG', 'OBP', 'SLG', 'ERA', 'WHIP']:
+        for col in ['Salary_2026_M', 'Salary_2027_M', 'Salary_2028_M', 'Strategy_Score', 'Dollar_Per_Score', 'AVG', 'OBP', 'SLG', 'ERA', 'WHIP']:
             if col in batters.columns:
                 batters[col] = batters[col].apply(lambda x: round(x, 2) if isinstance(x, (int, float)) and x != '' else x)
             if col in pitchers.columns:
@@ -107,8 +109,17 @@ def generate_html(data):
         .sortable:hover { background-color: #f3f4f6; }
         .fa-row { background-color: #ecfdf5 !important; }
         .partial-row { background-color: #fefce8 !important; }
-        .table-container { max-height: 600px; overflow-y: auto; }
+        .full-row { background-color: #fee2e2 !important; }
+        .table-container { max-height: 600px; overflow: auto; }
         thead th { position: sticky; top: 0; z-index: 10; }
+        .sticky-col { position: sticky; background-color: inherit; z-index: 5; }
+        .sticky-col-1 { left: 0; }
+        .sticky-col-2 { left: 90px; }
+        thead .sticky-col { z-index: 15; background-color: #f3f4f6; }
+        tr.fa-row .sticky-col { background-color: #ecfdf5; }
+        tr.partial-row .sticky-col { background-color: #fefce8; }
+        tr.full-row .sticky-col { background-color: #fee2e2; }
+        tr:not(.fa-row):not(.partial-row):not(.full-row) .sticky-col { background-color: white; }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -182,10 +193,14 @@ def generate_html(data):
                     <table class="min-w-full divide-y divide-gray-200">
                         <thead class="bg-gray-100">
                             <tr>
+                                <th @click="sortBy('Rostered_By', 'batters')" class="sortable sticky-col sticky-col-1 px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[90px]">Franchise</th>
+                                <th @click="sortBy('Block_Type', 'batters')" class="sortable sticky-col sticky-col-2 px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Block</th>
                                 <th @click="sortBy('Rank', 'batters')" class="sortable px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rank</th>
                                 <th @click="sortBy('Name', 'batters')" class="sortable px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Player</th>
                                 <th @click="sortBy('Team', 'batters')" class="sortable px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Team</th>
-                                <th @click="sortBy('Salary_M', 'batters')" class="sortable px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Salary</th>
+                                <th @click="sortBy('Salary_2026_M', 'batters')" class="sortable px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">2026</th>
+                                <th @click="sortBy('Salary_2027_M', 'batters')" class="sortable px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">2027</th>
+                                <th @click="sortBy('Salary_2028_M', 'batters')" class="sortable px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">2028</th>
                                 <th @click="sortBy('Strategy_Score', 'batters')" class="sortable px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Score</th>
                                 <th @click="sortBy('Dollar_Per_Score', 'batters')" class="sortable px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">$/Pt</th>
                                 <th @click="sortBy('HR', 'batters')" class="sortable px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">HR</th>
@@ -193,16 +208,19 @@ def generate_html(data):
                                 <th @click="sortBy('RBI', 'batters')" class="sortable px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">RBI</th>
                                 <th @click="sortBy('SB', 'batters')" class="sortable px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">SB</th>
                                 <th @click="sortBy('AVG', 'batters')" class="sortable px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">AVG</th>
-                                <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                             </tr>
                         </thead>
                         <tbody class="bg-white divide-y divide-gray-200">
                             <template x-for="player in filteredBatters()" :key="player.Name">
                                 <tr :class="getRowClass(player)">
+                                    <td class="sticky-col sticky-col-1 px-3 py-2 whitespace-nowrap text-sm text-gray-600 min-w-[90px]" x-text="formatFranchise(player.Rostered_By)"></td>
+                                    <td class="sticky-col sticky-col-2 px-3 py-2 whitespace-nowrap text-sm" x-html="getBlockBadge(player.Block_Type)"></td>
                                     <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-900" x-text="player.Rank"></td>
                                     <td class="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900" x-text="player.Name"></td>
                                     <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-500" x-text="player.Team"></td>
-                                    <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right" x-text="formatSalary(player.Salary_M)"></td>
+                                    <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right" x-text="formatSalary(player.Salary_2026_M)"></td>
+                                    <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right" x-text="formatSalary(player.Salary_2027_M)"></td>
+                                    <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right" x-text="formatSalary(player.Salary_2028_M)"></td>
                                     <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right font-semibold" x-text="player.Strategy_Score?.toFixed(2) || '-'"></td>
                                     <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-500 text-right" x-text="formatDPS(player.Dollar_Per_Score)"></td>
                                     <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right" x-text="player.HR || '-'"></td>
@@ -210,7 +228,6 @@ def generate_html(data):
                                     <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right" x-text="player.RBI || '-'"></td>
                                     <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right" x-text="player.SB || '-'"></td>
                                     <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right" x-text="player.AVG ? player.AVG.toFixed(3) : '-'"></td>
-                                    <td class="px-3 py-2 whitespace-nowrap text-sm" x-html="getStatusBadge(player)"></td>
                                 </tr>
                             </template>
                         </tbody>
@@ -228,10 +245,14 @@ def generate_html(data):
                     <table class="min-w-full divide-y divide-gray-200">
                         <thead class="bg-gray-100">
                             <tr>
+                                <th @click="sortBy('Rostered_By', 'pitchers')" class="sortable sticky-col sticky-col-1 px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[90px]">Franchise</th>
+                                <th @click="sortBy('Block_Type', 'pitchers')" class="sortable sticky-col sticky-col-2 px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Block</th>
                                 <th @click="sortBy('Rank', 'pitchers')" class="sortable px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rank</th>
                                 <th @click="sortBy('Name', 'pitchers')" class="sortable px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Player</th>
                                 <th @click="sortBy('Position', 'pitchers')" class="sortable px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Pos</th>
-                                <th @click="sortBy('Salary_M', 'pitchers')" class="sortable px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Salary</th>
+                                <th @click="sortBy('Salary_2026_M', 'pitchers')" class="sortable px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">2026</th>
+                                <th @click="sortBy('Salary_2027_M', 'pitchers')" class="sortable px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">2027</th>
+                                <th @click="sortBy('Salary_2028_M', 'pitchers')" class="sortable px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">2028</th>
                                 <th @click="sortBy('Strategy_Score', 'pitchers')" class="sortable px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Score</th>
                                 <th @click="sortBy('Dollar_Per_Score', 'pitchers')" class="sortable px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">$/Pt</th>
                                 <th @click="sortBy('QS', 'pitchers')" class="sortable px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">QS</th>
@@ -239,16 +260,19 @@ def generate_html(data):
                                 <th @click="sortBy('SV', 'pitchers')" class="sortable px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">SV</th>
                                 <th @click="sortBy('HLD', 'pitchers')" class="sortable px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">HLD</th>
                                 <th @click="sortBy('ERA', 'pitchers')" class="sortable px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">ERA</th>
-                                <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                             </tr>
                         </thead>
                         <tbody class="bg-white divide-y divide-gray-200">
                             <template x-for="player in filteredPitchers()" :key="player.Name">
                                 <tr :class="getRowClass(player)">
+                                    <td class="sticky-col sticky-col-1 px-3 py-2 whitespace-nowrap text-sm text-gray-600 min-w-[90px]" x-text="formatFranchise(player.Rostered_By)"></td>
+                                    <td class="sticky-col sticky-col-2 px-3 py-2 whitespace-nowrap text-sm" x-html="getBlockBadge(player.Block_Type)"></td>
                                     <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-900" x-text="player.Rank"></td>
                                     <td class="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900" x-text="player.Name"></td>
                                     <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-500" x-text="player.Position"></td>
-                                    <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right" x-text="formatSalary(player.Salary_M)"></td>
+                                    <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right" x-text="formatSalary(player.Salary_2026_M)"></td>
+                                    <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right" x-text="formatSalary(player.Salary_2027_M)"></td>
+                                    <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right" x-text="formatSalary(player.Salary_2028_M)"></td>
                                     <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right font-semibold" x-text="player.Strategy_Score?.toFixed(2) || '-'"></td>
                                     <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-500 text-right" x-text="formatDPS(player.Dollar_Per_Score)"></td>
                                     <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right" x-text="player.QS || '-'"></td>
@@ -256,7 +280,6 @@ def generate_html(data):
                                     <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right" x-text="player.SV || '-'"></td>
                                     <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right" x-text="player.HLD || '-'"></td>
                                     <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right" x-text="player.ERA ? player.ERA.toFixed(2) : '-'"></td>
-                                    <td class="px-3 py-2 whitespace-nowrap text-sm" x-html="getStatusBadge(player)"></td>
                                 </tr>
                             </template>
                         </tbody>
@@ -399,18 +422,42 @@ def generate_html(data):
 
                 getRowClass(player) {
                     if (!player.Rostered_By) return 'fa-row';
+                    if (player.Block_Type === 'Full') return 'full-row';
                     if (player.Block_Type === 'Partial') return 'partial-row';
                     return '';
                 },
 
-                getStatusBadge(player) {
-                    if (!player.Rostered_By) {
-                        return '<span class="bg-green-100 text-green-800 px-2 py-1 rounded text-xs">FA</span>';
+                formatFranchise(roster) {
+                    if (!roster) return 'FA';
+                    // Shorten long franchise names
+                    const shortcuts = {
+                        'Jake Zuckman & Andrew Meyers': 'Jake Z & Andrew',
+                        'Jake Levine & Johnny Drago': 'Jake L & Johnny',
+                        'Ben Brody & Aaron': 'Ben & Aaron',
+                        'Ross & Jack Kantor': 'Ross & Jack',
+                        'Brenden Freedman': 'Brenden',
+                        'Brian Frederick': 'Brian',
+                        'Ethan Gobetz': 'Ethan',
+                        'Nolan Chidester': 'Nolan',
+                        'Steve Cornish': 'Steve',
+                        'Tyler Hart': 'Tyler',
+                        'Zack Semler': 'Zack',
+                        'JD Barnett': 'JD'
+                    };
+                    return shortcuts[roster] || roster;
+                },
+
+                getBlockBadge(blockType) {
+                    if (!blockType) {
+                        return '<span class="bg-green-100 text-green-800 px-2 py-1 rounded text-xs">-</span>';
                     }
-                    if (player.Block_Type === 'Partial') {
-                        return '<span class="bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs" title="' + player.Rostered_By + '">Partial</span>';
+                    if (blockType === 'Full') {
+                        return '<span class="bg-red-100 text-red-800 px-2 py-1 rounded text-xs">Full</span>';
                     }
-                    return '<span class="text-gray-400 text-xs">' + player.Rostered_By + '</span>';
+                    if (blockType === 'Partial') {
+                        return '<span class="bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs">Partial</span>';
+                    }
+                    return '<span class="text-gray-400 text-xs">-</span>';
                 }
             }
         }

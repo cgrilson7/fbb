@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Fantasy baseball analysis tools for a 12-team rotisserie league on Fantrax. The project analyzes category standings to find strategic advantages and optimal team-building approaches.
+Fantasy baseball draft analysis tools for a 12-team rotisserie league on Fantrax. The project generates strategy-weighted draft boards using FanGraphs projections, validates strategies against historical league results, and outputs an interactive HTML dashboard.
 
 ## Running the Analysis
 
@@ -12,35 +12,73 @@ Fantasy baseball analysis tools for a 12-team rotisserie league on Fantrax. The 
 # Activate virtual environment
 source venv/bin/activate
 
-# Run the main analysis script
+# Full pipeline (run in order):
+python match_players.py              # Generate master player database
+python draft_board_analysis.py balanced         # Generate draft board (one strategy)
+python draft_board_analysis.py volume_power
+python draft_board_analysis.py power_rp
+python draft_board_analysis.py speed_rates
+python draft_board_analysis.py elite_bullpen
+python generate_fbb_page.py          # Generate interactive HTML dashboard
+
+# Standalone analysis (historical league data)
 python analyze_fantasy.py
 ```
 
-## Data Sources
+## Data Pipeline
 
-- `fantrax_data.csv`: League standings with Team, Category, Value, Rank, and Points columns
-- `fangraphs-leaderboard-projections.csv`: FanGraphs player projections for roster analysis
-- `Dynasty Constitution (1).pdf`: League rules and scoring settings
-- `fantrax_screenshots/`: Screenshot archives of league standings
+```
+FanGraphs projections + pitchers.csv + blocked_players.csv + rosters.csv
+                              ↓
+                    match_players.py
+                              ↓
+                      all_players.csv (master database, ~9K players)
+                              ↓
+                  draft_board_analysis.py (× 5 strategies)
+                              ↓
+                    draft_board_[strategy].csv
+                              ↓
+                    generate_fbb_page.py
+                              ↓
+                        index.html
+```
+
+## Code Architecture
+
+### match_players.py
+Merges FanGraphs projections with blocking/roster data into master database. Normalizes player names for matching, handles duplicates (Ohtani as batter, Edwin Diaz as pitcher), calculates derived metrics (counting stats, FPTS/M, WAR/dollar).
+
+### draft_board_analysis.py
+Generates strategy-weighted draft boards. Takes strategy name as CLI argument. Calculates z-scores for all stats, applies strategy-specific weights (positive for targets, negative for punts), assigns tiers by percentile.
+
+**Strategies:**
+- `volume_power`: R, HR, RBI + QS, K, ERA, WHIP (punt SB, SV, HLD)
+- `power_rp`: HR, RBI, SLG + SV, HLD, ERA, WHIP (punt SB, QS)
+- `speed_rates`: SB, AVG, OBP + ERA, WHIP, K (punt HR, RBI, QS)
+- `balanced`: All categories equally weighted
+- `elite_bullpen`: SV, HLD, ERA, WHIP + AVG, OBP (punt HR, QS, K)
+
+### generate_fbb_page.py
+Creates interactive HTML dashboard with Alpine.js. Features: strategy tabs, sortable tables, search/filter (hide free agents, hide partial blocks), color-coded rows by status.
+
+### analyze_fantasy.py
+Historical league analysis. Creates pivot tables, calculates category correlations, identifies underutilized category combinations, scores team-building archetypes.
 
 ## League Structure
 
 - **14 categories**: R, HR, RBI, SB, AVG, OBP, SLG (batting) + QS, SV, HLD, BB9, K, ERA, WHIP (pitching)
 - **12 teams**: Rotisserie format where each category ranks 1-12, points sum to total score
 
-## Code Architecture
+## Key Thresholds
 
-`analyze_fantasy.py` performs multi-faceted category analysis:
+- Batters: 400+ PA to qualify
+- Starters: 100+ IP (or 40+ IP for reliever-heavy strategies)
+- Tiers: T1 (top 10%), T2 (10-30%), T3 (30-50%), T4 (bottom 50%)
 
-1. Creates pivot tables (Team × Category) for points, values, and ranks
-2. Calculates category competitiveness via standard deviation
-3. Builds correlation matrix to find category synergies/anti-synergies
-4. Identifies underutilized category combinations using top-N overlap analysis
-5. Evaluates 7-category "bundles" for head-to-head majority strategies
-6. Defines and scores team-building archetypes
+## Data Sources
 
-Key data structures:
-- `pivot_points`: Team performance in roto points per category
-- `pivot_values`: Raw stat values per category
-- `pivot_ranks`: Team rank (1-12) per category
-- `corr_matrix`: Category-to-category correlation coefficients
+- `fangraphs-leaderboard-projections.csv`: FanGraphs batter projections
+- `pitchers.csv`: Pitcher projections
+- `blocked_players.csv`: Player blocking status (Full/Partial)
+- `rosters.csv`: Roster assignments and salaries (2025-2028)
+- `fantrax_data.csv`: Historical league standings

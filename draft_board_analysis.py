@@ -282,7 +282,12 @@ draft_board['Rank'] = range(1, len(draft_board) + 1)
 # =============================================================================
 
 # Salary in millions for display
-draft_board['Salary_M'] = draft_board['Salary_2026'] / 1_000_000
+draft_board['Salary_2026_M'] = draft_board['Salary_2026'] / 1_000_000
+draft_board['Salary_2027_M'] = draft_board['Salary_2027'] / 1_000_000
+draft_board['Salary_2028_M'] = draft_board['Salary_2028'] / 1_000_000
+
+# Backwards compat
+draft_board['Salary_M'] = draft_board['Salary_2026_M']
 
 # $ per Strategy Score point (lower = better value)
 # Only calculate for players with salary and positive score
@@ -299,7 +304,7 @@ draft_board['Dollar_Per_Score'] = draft_board.apply(
 output_cols = [
     'Rank', 'Name', 'Team', 'Player_Type', 'Position',
     # Salary
-    'Salary_M', 'Dollar_Per_Score', 'Rostered_By',
+    'Salary_2026_M', 'Salary_2027_M', 'Salary_2028_M', 'Dollar_Per_Score', 'Rostered_By',
     # Batter stats
     'HR', 'R', 'RBI', 'SB', 'AVG', 'OBP', 'SLG',
     # Pitcher stats
