@@ -82,3 +82,30 @@ Historical league analysis. Creates pivot tables, calculates category correlatio
 - `blocked_players.csv`: Player blocking status (Full/Partial)
 - `rosters.csv`: Roster assignments and salaries (2025-2028)
 - `fantrax_data.csv`: Historical league standings
+
+## Dynasty Analysis App (`app/`)
+
+Next.js React app for dynasty league management. Run with `cd app && npm run dev`.
+
+### Features
+- **Upload**: CSV file upload with auto-detection and join across data sources
+- **Players**: Searchable/sortable table with HKB dynasty rankings
+- **Trade**: Two-panel trade analyzer comparing HKB values
+- **Prospects**: Sortable prospect table with MiLB stats (batting/pitching)
+- **Salaries**: Year-by-year salary breakdown, expiring contracts, franchise comparison
+- **Match**: Manual reconciliation for unmatched player names
+- **Franchises**: Edit status code → franchise name mappings
+
+### Data Files
+- `all.csv`: Base player universe from Fantrax (~10K players)
+- `harryknowsball_players.csv`: Dynasty rankings (HKB rank/value)
+- `salaries.csv`: League contracts with yearly salary hits
+- `batting_prospects.csv` / `pitching_prospects.csv`: MiLB stats
+
+### Key Code
+- `src/lib/store.ts`: Zustand store with data joining logic
+- `src/lib/normalize.ts`: Name normalization with nickname expansion (Leo→Leodalis, etc.)
+- `src/lib/csvParser.ts`: CSV parsing and file type detection
+
+### Your Franchise
+Colin Wilson & Greg Holmes (status code: "C&G")
