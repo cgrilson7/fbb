@@ -109,3 +109,12 @@ Next.js React app for dynasty league management. Run with `cd app && npm run dev
 
 ### Your Franchise
 Colin Wilson & Greg Holmes (status code: "C&G")
+
+## League Rules Questions
+
+When answering questions about league rules, contracts, salaries, free agency, trades, penalties, or any other constitutional matters:
+
+1. **Always read `constitution.pdf`** before answering - never rely on memory or assumptions
+2. The constitution is ~7,000 tokens and covers: rosters, salary caps, contracts, free agency (off-season and in-season), trades, farm system, young player salary structure, expansion, penalties, and more
+3. Cite the specific section (e.g., "Section 4.2 Young Players Salary Structure") when providing answers
+4. If the constitution is ambiguous or doesn't cover the scenario, say so explicitly

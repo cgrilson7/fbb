@@ -3,3 +3,21 @@ venv/
 __pycache__/
 *.pyc
 .env
+
+# Next.js app
+app/node_modules/
+app/.next/
+
+# Generated files (output of pipeline)
+all_players.csv
+draft_board_*.csv
+index.html
+
+# Screenshots
+fantrax_screenshots/
+
+# Temporary/dated files
+available_*.csv
+fa_through_*.csv
+prospects_filtered.csv
+strategy_session_*.md
