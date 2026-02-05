@@ -6,7 +6,15 @@ import { DollarSign, TrendingUp, Calendar } from 'lucide-react'
 
 const MY_FRANCHISE = 'Colin Wilson & Greg Holmes'
 const CURRENT_YEAR = 2026
-const SALARY_CAP = 400 // Adjust based on league rules
+
+// Salary cap per constitution Section 2.3: $150MM in 2024, +$10MM per year
+const getSalaryCap = (year: number): number => {
+  const baseCap = 150_000_000
+  const yearsSince2024 = year - 2024
+  return baseCap + (yearsSince2024 * 10_000_000)
+}
+
+const SALARY_CAP = getSalaryCap(CURRENT_YEAR) // $170MM for 2026
 
 export default function SalariesPage() {
   const { salaries, players, franchiseMappings } = usePlayerStore()
@@ -144,9 +152,11 @@ export default function SalariesPage() {
               <TrendingUp className="w-6 h-6 text-blue-600 dark:text-blue-400" />
             </div>
             <div>
-              <p className="text-sm text-gray-500 dark:text-gray-400">Cap Space</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Cap Usage ({((yearlyTotals[0]?.total || 0) / SALARY_CAP * 100).toFixed(0)}%)
+              </p>
               <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                ${(SALARY_CAP - (yearlyTotals[0]?.total || 0)).toLocaleString()}
+                ${((yearlyTotals[0]?.total || 0) / 1_000_000).toFixed(1)}M / ${(SALARY_CAP / 1_000_000).toFixed(0)}M
               </p>
             </div>
           </div>
@@ -166,55 +176,133 @@ export default function SalariesPage() {
         </div>
       </div>
 
-      {/* Year-by-Year Chart */}
+      {/* Year-by-Year Chart - Horizontal bars with year on Y-axis */}
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
           Salary by Year
         </h2>
-        <div className="flex items-end gap-4 h-48">
-          {yearlyTotals.map((item, i) => {
-            const maxTotal = Math.max(...yearlyTotals.map(y => y.total), SALARY_CAP)
-            const height = maxTotal > 0 ? (item.total / maxTotal) * 100 : 0
-            const compareHeight = compareMode && compareYearlyTotals[i]
-              ? (compareYearlyTotals[i].total / maxTotal) * 100
-              : 0
 
-            return (
-              <div key={item.year} className="flex-1 flex flex-col items-center">
-                <div className="flex gap-1 items-end h-40 w-full justify-center">
-                  <div
-                    className="bg-blue-500 dark:bg-blue-400 rounded-t w-1/2 max-w-[40px] transition-all"
-                    style={{ height: `${height}%` }}
-                    title={`$${item.total.toLocaleString()}`}
-                  />
-                  {compareMode && compareFranchise && (
-                    <div
-                      className="bg-purple-500 dark:bg-purple-400 rounded-t w-1/2 max-w-[40px] transition-all"
-                      style={{ height: `${compareHeight}%` }}
-                      title={`$${compareYearlyTotals[i]?.total.toLocaleString()}`}
-                    />
-                  )}
-                </div>
-                <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">{item.year}</p>
-                <p className="text-xs text-gray-500 dark:text-gray-500">
-                  ${(item.total / 1000).toFixed(0)}k
-                </p>
-              </div>
-            )
-          })}
-        </div>
-        {compareMode && compareFranchise && (
-          <div className="flex gap-4 justify-center mt-4">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 bg-blue-500 rounded" />
-              <span className="text-sm text-gray-600 dark:text-gray-400">{selectedFranchise}</span>
+        {(() => {
+          // Calculate max for scaling - use 130% of highest year's cap
+          const maxYearCap = getSalaryCap(2031)
+          const maxSalary = Math.max(...yearlyTotals.map(y => y.total))
+          const maxValue = Math.max(maxSalary, maxYearCap * 1.3)
+
+          return (
+            <div className="space-y-3">
+              {yearlyTotals.map((item, i) => {
+                const yearCap = getSalaryCap(item.year)
+                const width = maxValue > 0 ? (item.total / maxValue) * 100 : 0
+                const compareWidth = compareMode && compareYearlyTotals[i]
+                  ? (compareYearlyTotals[i].total / maxValue) * 100
+                  : 0
+                const capPct = (item.total / yearCap * 100).toFixed(0)
+
+                // Calculate threshold positions for this year's cap
+                const threshold100 = (yearCap / maxValue) * 100
+                const threshold110 = (yearCap * 1.1 / maxValue) * 100
+                const threshold120 = (yearCap * 1.2 / maxValue) * 100
+
+                return (
+                  <div key={item.year} className="flex items-center gap-2">
+                    <div className="w-[50px] text-right">
+                      <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{item.year}</span>
+                    </div>
+                    <div className="flex-1 relative h-8">
+                      {/* Background track with threshold markers */}
+                      <div className="absolute inset-0 bg-gray-100 dark:bg-gray-700 rounded">
+                        {/* 100% marker */}
+                        <div
+                          className="absolute top-0 bottom-0 border-l-2 border-green-500 z-10"
+                          style={{ left: `${threshold100}%` }}
+                        >
+                          <span className="absolute top-1/2 -translate-y-1/2 left-1 text-[10px] font-medium text-green-700 dark:text-green-400">
+                            100%
+                          </span>
+                        </div>
+                        {/* 110% marker */}
+                        <div
+                          className="absolute top-0 bottom-0 border-l-2 border-yellow-500 z-10"
+                          style={{ left: `${threshold110}%` }}
+                        >
+                          <span className="absolute top-1/2 -translate-y-1/2 left-1 text-[10px] font-medium text-yellow-700 dark:text-yellow-400">
+                            110%
+                          </span>
+                        </div>
+                        {/* 120% marker */}
+                        <div
+                          className="absolute top-0 bottom-0 border-l-2 border-red-500 z-10"
+                          style={{ left: `${threshold120}%` }}
+                        >
+                          <span className="absolute top-1/2 -translate-y-1/2 left-1 text-[10px] font-medium text-red-700 dark:text-red-400">
+                            120%
+                          </span>
+                        </div>
+                      </div>
+                      {/* Salary bar */}
+                      <div
+                        className={`absolute top-0 bottom-0 rounded-r transition-all ${
+                          item.total > yearCap * 1.2 ? 'bg-red-500/80 dark:bg-red-400/80' :
+                          item.total > yearCap * 1.1 ? 'bg-yellow-500/80 dark:bg-yellow-400/80' :
+                          item.total > yearCap ? 'bg-orange-500/80 dark:bg-orange-400/80' :
+                          'bg-blue-500/80 dark:bg-blue-400/80'
+                        }`}
+                        style={{ width: `${width}%` }}
+                        title={`$${item.total.toLocaleString()} (${capPct}% of $${(yearCap/1_000_000).toFixed(0)}M cap)`}
+                      />
+                      {compareMode && compareFranchise && (
+                        <div
+                          className="absolute top-6 h-2 bg-purple-500 dark:bg-purple-400 rounded-r transition-all"
+                          style={{ width: `${compareWidth}%` }}
+                          title={`$${compareYearlyTotals[i]?.total.toLocaleString()}`}
+                        />
+                      )}
+                    </div>
+                    <div className="w-[110px] text-right">
+                      <span className="text-sm text-gray-600 dark:text-gray-400">
+                        ${(item.total / 1_000_000).toFixed(1)}M
+                      </span>
+                      <span className={`text-xs ml-1 font-medium ${
+                        item.total > yearCap * 1.2 ? 'text-red-600 dark:text-red-400' :
+                        item.total > yearCap * 1.1 ? 'text-yellow-600 dark:text-yellow-400' :
+                        item.total > yearCap ? 'text-orange-600 dark:text-orange-400' :
+                        'text-green-600 dark:text-green-400'
+                      }`}>
+                        ({capPct}%)
+                      </span>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 bg-purple-500 rounded" />
-              <span className="text-sm text-gray-600 dark:text-gray-400">{compareFranchise}</span>
-            </div>
+          )
+        })()}
+
+        {/* Legend */}
+        <div className="flex flex-wrap gap-4 justify-center mt-6 pt-4 border-t border-gray-200 dark:border-gray-700 text-xs">
+          <div className="flex items-center gap-1">
+            <div className="w-3 h-3 bg-blue-500 rounded" />
+            <span className="text-gray-600 dark:text-gray-400">Under cap</span>
           </div>
-        )}
+          <div className="flex items-center gap-1">
+            <div className="w-3 h-3 bg-orange-500 rounded" />
+            <span className="text-gray-600 dark:text-gray-400">100-110%</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="w-3 h-3 bg-yellow-500 rounded" />
+            <span className="text-gray-600 dark:text-gray-400">110-120%</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="w-3 h-3 bg-red-500 rounded" />
+            <span className="text-gray-600 dark:text-gray-400">Over 120%</span>
+          </div>
+          {compareMode && compareFranchise && (
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-3 bg-purple-500 rounded" />
+              <span className="text-gray-600 dark:text-gray-400">{compareFranchise}</span>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
