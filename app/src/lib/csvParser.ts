@@ -131,14 +131,26 @@ function transformSalary(row: Record<string, string>): SalaryEntry {
     }
   }
 
+  // For YP/Minors contracts, the "Salary" column may be non-numeric (e.g. "YP")
+  // Fall back to the current year's salary hit
+  const rawSalary = getValue(['Salary'])
+  let salary = parseCurrency(rawSalary)
+  if (salary === 0 && rawSalary && !/\d/.test(rawSalary.replace(/[$,.\s-]/g, ''))) {
+    // Non-numeric salary field - use 2026 salary hit as fallback
+    salary = salaryByYear[2026] || Object.values(salaryByYear).find(v => v > 0) || 0
+  }
+
+  const contractStartsRaw = getValue(['Contract Starts'])
+  const contractEndsRaw = getValue(['Contract Ends'])
+
   return {
     playerName,
     franchise: getValue(['Franchise', 'Owner']).trim(),
     contractType: getValue(['Contract Type']).trim(),
-    salary: parseCurrency(getValue(['Salary']) || '0'),
-    contractLength: parseInt(getValue(['Contract Length']) || '1', 10),
-    contractStarts: parseInt(getValue(['Contract Starts']) || '2026', 10),
-    contractEnds: parseInt(getValue(['Contract Ends']) || '2026', 10),
+    salary,
+    contractLength: parseInt(getValue(['Contract Length']) || '0', 10),
+    contractStarts: contractStartsRaw ? parseInt(contractStartsRaw, 10) : 0,
+    contractEnds: contractEndsRaw ? parseInt(contractEndsRaw, 10) : 0,
     salaryByYear,
     normalizedName: normalize(playerName)
   }

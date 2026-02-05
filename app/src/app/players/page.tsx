@@ -50,7 +50,9 @@ export default function PlayersPage() {
 
     // Position filter
     if (positionFilter) {
-      result = result.filter(p => p.position.includes(positionFilter))
+      result = result.filter(p =>
+        p.position.split(',').some(pos => pos.trim() === positionFilter)
+      )
     }
 
     // Team filter

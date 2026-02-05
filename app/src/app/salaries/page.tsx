@@ -63,10 +63,10 @@ export default function SalariesPage() {
     })
   }, [compareSalaries, compareFranchise])
 
-  // Expiring contracts
+  // Expiring contracts (exclude players with no real contract end date)
   const expiringContracts = useMemo(() => {
     return franchiseSalaries
-      .filter(s => s.contractEnds === CURRENT_YEAR || s.contractEnds === CURRENT_YEAR + 1)
+      .filter(s => s.contractEnds > 0 && (s.contractEnds === CURRENT_YEAR || s.contractEnds === CURRENT_YEAR + 1))
       .sort((a, b) => a.contractEnds - b.contractEnds)
   }, [franchiseSalaries])
 
@@ -334,7 +334,7 @@ export default function SalariesPage() {
                       </p>
                     </div>
                     <span className="font-medium text-gray-900 dark:text-white">
-                      ${contract.salary.toLocaleString()}
+                      ${(contract.salaryByYear[contract.contractEnds] || contract.salary).toLocaleString()}
                     </span>
                   </div>
                 ))}
