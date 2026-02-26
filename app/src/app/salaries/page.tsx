@@ -2,7 +2,9 @@
 
 import { useState, useMemo } from 'react'
 import { usePlayerStore } from '@/lib/store'
-import { DollarSign, TrendingUp, Calendar } from 'lucide-react'
+import { useHydration } from '@/lib/useHydration'
+import { DollarSign, TrendingUp, Calendar, Loader2, ShieldOff, Shield } from 'lucide-react'
+import { normalize } from '@/lib/normalize'
 
 const MY_FRANCHISE = 'Colin Wilson & Greg Holmes'
 const CURRENT_YEAR = 2026
@@ -17,7 +19,8 @@ const getSalaryCap = (year: number): number => {
 const SALARY_CAP = getSalaryCap(CURRENT_YEAR) // $170MM for 2026
 
 export default function SalariesPage() {
-  const { salaries, players, franchiseMappings } = usePlayerStore()
+  const { salaries, players, franchiseMappings, salaryReliefDesignations, addSalaryRelief, removeSalaryRelief } = usePlayerStore()
+  const hasHydrated = useHydration()
   const [selectedFranchise, setSelectedFranchise] = useState(MY_FRANCHISE)
   const [compareMode, setCompareMode] = useState(false)
   const [compareFranchise, setCompareFranchise] = useState('')
@@ -35,16 +38,45 @@ export default function SalariesPage() {
     return salaries.filter(s => s.franchise === selectedFranchise)
   }, [salaries, selectedFranchise])
 
-  // Calculate year-by-year totals
+  // Salary relief helpers for selected franchise
+  const franchiseReliefDesignations = useMemo(() => {
+    return salaryReliefDesignations.filter(d =>
+      franchiseSalaries.some(s => s.normalizedName === d.normalizedName)
+    )
+  }, [salaryReliefDesignations, franchiseSalaries])
+
+  const isRelieved = (normalizedName: string, year: number) =>
+    salaryReliefDesignations.some(d => d.normalizedName === normalizedName && d.year === year)
+
+  const reliefCountForYear = (year: number) =>
+    franchiseReliefDesignations.filter(d => d.year === year).length
+
+  const isMyFranchise = selectedFranchise === MY_FRANCHISE
+
+  const toggleRelief = (contract: typeof franchiseSalaries[0], year: number) => {
+    if (isRelieved(contract.normalizedName, year)) {
+      removeSalaryRelief(contract.normalizedName, year)
+    } else {
+      if (reliefCountForYear(year) >= 3) return
+      addSalaryRelief({
+        playerName: contract.playerName,
+        normalizedName: contract.normalizedName,
+        year,
+      })
+    }
+  }
+
+  // Calculate year-by-year totals (excluding salary-relieved players)
   const yearlyTotals = useMemo(() => {
     const years = [2026, 2027, 2028, 2029, 2030, 2031]
     return years.map(year => {
       const total = franchiseSalaries.reduce((sum, s) => {
+        if (isRelieved(s.normalizedName, year)) return sum
         return sum + (s.salaryByYear[year] || 0)
       }, 0)
       return { year, total }
     })
-  }, [franchiseSalaries])
+  }, [franchiseSalaries, salaryReliefDesignations])
 
   // Compare franchise data
   const compareSalaries = useMemo(() => {
@@ -80,6 +112,15 @@ export default function SalariesPage() {
     })
     return grouped
   }, [franchiseSalaries])
+
+  if (!hasHydrated) {
+    return (
+      <div className="flex items-center justify-center py-12 gap-3">
+        <Loader2 className="w-5 h-5 animate-spin text-blue-500" />
+        <p className="text-gray-500 dark:text-gray-400">Loading data...</p>
+      </div>
+    )
+  }
 
   if (salaries.length === 0) {
     return (
@@ -175,6 +216,16 @@ export default function SalariesPage() {
           </div>
         </div>
       </div>
+
+      {/* Salary Relief Counter */}
+      {isMyFranchise && (
+        <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+          <Shield className="w-4 h-4 text-purple-500" />
+          <span>
+            Salary Relief ({CURRENT_YEAR}): <strong className="text-gray-900 dark:text-white">{reliefCountForYear(CURRENT_YEAR)}/3</strong> designations used
+          </span>
+        </div>
+      )}
 
       {/* Year-by-Year Chart - Horizontal bars with year on Y-axis */}
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
@@ -393,28 +444,61 @@ export default function SalariesPage() {
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Salary</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Years</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Ends</th>
+                {isMyFranchise && (
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Relief</th>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-              {franchiseSalaries.map((contract, i) => (
-                <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-700">
-                  <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">
-                    {contract.playerName}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
-                    {contract.contractType}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
-                    ${contract.salary.toLocaleString()}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
-                    {contract.contractLength}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
-                    {contract.contractEnds}
-                  </td>
-                </tr>
-              ))}
+              {franchiseSalaries.map((contract, i) => {
+                const relieved = isRelieved(contract.normalizedName, CURRENT_YEAR)
+                return (
+                  <tr key={i} className={`hover:bg-gray-50 dark:hover:bg-gray-700 ${
+                    relieved ? 'bg-purple-50 dark:bg-purple-900/20 opacity-70' : ''
+                  }`}>
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">
+                      <span className={relieved ? 'line-through' : ''}>
+                        {contract.playerName}
+                      </span>
+                      {relieved && (
+                        <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-100 text-purple-800 dark:bg-purple-800 dark:text-purple-100">
+                          IR$
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+                      {contract.contractType}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+                      ${contract.salary.toLocaleString()}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+                      {contract.contractLength}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+                      {contract.contractEnds}
+                    </td>
+                    {isMyFranchise && (
+                      <td className="px-4 py-3 text-sm">
+                        <button
+                          onClick={() => toggleRelief(contract, CURRENT_YEAR)}
+                          disabled={!relieved && reliefCountForYear(CURRENT_YEAR) >= 3}
+                          className={`p-1 rounded transition-colors ${
+                            relieved
+                              ? 'text-purple-600 dark:text-purple-400 hover:bg-purple-100 dark:hover:bg-purple-900/40'
+                              : reliefCountForYear(CURRENT_YEAR) >= 3
+                              ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
+                              : 'text-gray-400 dark:text-gray-500 hover:text-purple-600 dark:hover:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20'
+                          }`}
+                          title={relieved ? 'Remove salary relief' : reliefCountForYear(CURRENT_YEAR) >= 3 ? '3/3 designations used' : 'Designate for salary relief'}
+                        >
+                          {relieved ? <Shield className="w-4 h-4" /> : <ShieldOff className="w-4 h-4" />}
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>

@@ -9,7 +9,6 @@ const NICKNAMES: Record<string, string> = {
   'joe': 'joseph',
   'joey': 'joseph',
   'tom': 'thomas',
-  'tommy': 'thomas',
   'bill': 'william',
   'billy': 'william',
   'will': 'william',
@@ -96,6 +95,8 @@ function expandNickname(firstName: string): string {
  */
 export function normalize(name: string): string {
   let normalized = name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // Strip accent marks (é→e, ü→u, etc.)
     .toLowerCase()
     .trim()
     .replace(/\./g, '')

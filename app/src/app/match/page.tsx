@@ -1,12 +1,28 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { usePlayerStore } from '@/lib/store'
-import { Check, X, AlertTriangle, Link2 } from 'lucide-react'
+import { useHydration } from '@/lib/useHydration'
+import { findBestMatches } from '@/lib/normalize'
+import { Check, X, AlertTriangle, Link2, Loader2 } from 'lucide-react'
 
 export default function MatchPage() {
-  const { unmatchedPlayers, addNameMapping, clearUnmatched, joinData } = usePlayerStore()
+  const { unmatchedPlayers, hkbPlayers, addNameMapping, clearUnmatched, joinData } = usePlayerStore()
+  const hasHydrated = useHydration()
   const [selectedUnmatched, setSelectedUnmatched] = useState<number | null>(null)
+
+  // Lazily compute fuzzy match candidates only on this page
+  const unmatchedWithCandidates = useMemo(() => {
+    if (unmatchedPlayers.length === 0 || hkbPlayers.length === 0) return unmatchedPlayers
+
+    const hkbCandidates = hkbPlayers.map(h => ({ name: h.name, normalizedName: h.normalizedName }))
+
+    return unmatchedPlayers.map(player => {
+      if (player.candidates.length > 0) return player
+      const candidates = findBestMatches(player.name, hkbCandidates)
+      return { ...player, candidates }
+    })
+  }, [unmatchedPlayers, hkbPlayers])
 
   const handleConfirmMatch = (sourceName: string, targetName: string) => {
     addNameMapping({
@@ -15,7 +31,7 @@ export default function MatchPage() {
       confirmedBy: 'user'
     })
     clearUnmatched(sourceName)
-    joinData() // Re-join with new mapping
+    joinData()
     setSelectedUnmatched(null)
   }
 
@@ -24,7 +40,16 @@ export default function MatchPage() {
     setSelectedUnmatched(null)
   }
 
-  if (unmatchedPlayers.length === 0) {
+  if (!hasHydrated) {
+    return (
+      <div className="flex items-center justify-center py-12 gap-3">
+        <Loader2 className="w-5 h-5 animate-spin text-blue-500" />
+        <p className="text-gray-500 dark:text-gray-400">Loading data...</p>
+      </div>
+    )
+  }
+
+  if (unmatchedWithCandidates.length === 0) {
     return (
       <div className="space-y-6">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
@@ -50,7 +75,7 @@ export default function MatchPage() {
           Match Reconciliation
         </h1>
         <span className="text-sm text-gray-500 dark:text-gray-400">
-          {unmatchedPlayers.length} players need review
+          {unmatchedWithCandidates.length} players need review
         </span>
       </div>
 
@@ -73,7 +98,7 @@ export default function MatchPage() {
             </h2>
           </div>
           <div className="divide-y divide-gray-200 dark:divide-gray-700 max-h-[600px] overflow-auto">
-            {unmatchedPlayers.map((player, index) => (
+            {unmatchedWithCandidates.map((player, index) => (
               <button
                 key={`${player.name}-${index}`}
                 onClick={() => setSelectedUnmatched(index)}
@@ -108,18 +133,18 @@ export default function MatchPage() {
               Match Candidates
             </h2>
           </div>
-          {selectedUnmatched !== null && unmatchedPlayers[selectedUnmatched] ? (
+          {selectedUnmatched !== null && unmatchedWithCandidates[selectedUnmatched] ? (
             <div className="p-4">
               <div className="mb-4 pb-4 border-b border-gray-200 dark:border-gray-700">
                 <p className="text-sm text-gray-500 dark:text-gray-400">Looking for match for:</p>
                 <p className="text-lg font-semibold text-gray-900 dark:text-white">
-                  {unmatchedPlayers[selectedUnmatched].name}
+                  {unmatchedWithCandidates[selectedUnmatched].name}
                 </p>
               </div>
 
-              {unmatchedPlayers[selectedUnmatched].candidates.length > 0 ? (
+              {unmatchedWithCandidates[selectedUnmatched].candidates.length > 0 ? (
                 <div className="space-y-3">
-                  {unmatchedPlayers[selectedUnmatched].candidates.map((candidate, i) => (
+                  {unmatchedWithCandidates[selectedUnmatched].candidates.map((candidate, i) => (
                     <div
                       key={i}
                       className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg"
@@ -137,7 +162,7 @@ export default function MatchPage() {
                       </div>
                       <button
                         onClick={() => handleConfirmMatch(
-                          unmatchedPlayers[selectedUnmatched].name,
+                          unmatchedWithCandidates[selectedUnmatched].name,
                           candidate.name
                         )}
                         className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium flex items-center gap-1"
@@ -156,7 +181,7 @@ export default function MatchPage() {
 
               <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
                 <button
-                  onClick={() => handleSkip(unmatchedPlayers[selectedUnmatched].name)}
+                  onClick={() => handleSkip(unmatchedWithCandidates[selectedUnmatched].name)}
                   className="w-full px-4 py-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white text-sm font-medium flex items-center justify-center gap-2"
                 >
                   <X className="w-4 h-4" />

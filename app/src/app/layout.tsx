@@ -9,8 +9,13 @@ import {
   ArrowLeftRight,
   Star,
   DollarSign,
+  Gavel,
+  Layers,
   Link2,
   Building2,
+  Diamond,
+  Sprout,
+  ClipboardList,
   Moon,
   Sun
 } from 'lucide-react'
@@ -21,8 +26,13 @@ const navItems = [
   { href: '/players', label: 'Players', icon: Users },
   { href: '/trade', label: 'Trade', icon: ArrowLeftRight },
   { href: '/prospects', label: 'Prospects', icon: Star },
+  { href: '/farm-system', label: 'Farms', icon: Sprout },
   { href: '/salaries', label: 'Salaries', icon: DollarSign },
+  { href: '/free-agency', label: 'Free Agency', icon: Gavel },
+  { href: '/pool', label: 'Pool', icon: Layers },
+  { href: '/rfo', label: 'RFO', icon: ClipboardList },
   { href: '/match', label: 'Match', icon: Link2 },
+  { href: '/franchise-value', label: 'Value', icon: Diamond },
   { href: '/franchises', label: 'Franchises', icon: Building2 },
 ]
 

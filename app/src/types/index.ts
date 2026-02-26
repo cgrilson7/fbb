@@ -23,6 +23,14 @@ export interface Player {
   prospectRank: number | null
   prospectLevel: string | null
   prospectStats: ProspectStats | null
+  // Joined from FV Rankings
+  fvRank: number | null
+  fvGrade: number | null
+  fvETA: number | null
+  fvHighestLevel: string | null
+  fvPosition: string | null
+  // Joined from ZiPS
+  zipsProjection: ZipsProjection | null
   // Derived
   isAvailable: boolean
   matchConfidence: number
@@ -49,6 +57,7 @@ export interface SalaryEntry {
   contractStarts: number
   contractEnds: number
   salaryByYear: Record<number, number>
+  acquisitionDate: string
   normalizedName: string
 }
 
@@ -139,4 +148,110 @@ export interface NameMapping {
   source: string
   target: string
   confirmedBy: 'auto' | 'user'
+}
+
+export interface ZipsBatter {
+  name: string
+  team: string
+  pa: number
+  hr: number
+  r: number
+  rbi: number
+  sb: number
+  avg: number
+  obp: number
+  slg: number
+  ops: number
+  wrcPlus: number
+  war: number
+  fpts: number
+  fptsPerG: number
+  normalizedName: string
+}
+
+export interface ZipsPitcher {
+  name: string
+  team: string
+  w: number
+  qs: number
+  era: number
+  sv: number
+  hld: number
+  ip: number
+  k: number
+  bb9: number
+  whip: number
+  war: number
+  fpts: number
+  fptsPerIP: number
+  normalizedName: string
+}
+
+export interface FVRanking {
+  rank: number
+  name: string
+  team: string
+  age: number | null
+  highestLevel: string
+  position: string
+  eta: number | null
+  fv: number
+  normalizedName: string
+}
+
+export interface FreeAgentEntry {
+  playerName: string
+  auctionDate: string
+  previousFranchise: string
+  acquisitionDate: string
+  fwar2024: number | null
+  projectedStat: number | null
+  isRFA: boolean
+  hometownEligible: boolean
+  winningFranchise: string
+  winningContract: string
+  otherBids: string
+  normalizedName: string
+}
+
+export interface SalaryReliefDesignation {
+  playerName: string
+  normalizedName: string
+  year: number
+}
+
+export interface RfoDraftPick {
+  normalizedName: string
+  playerName: string
+  franchise: string
+  level: number
+  round?: number
+}
+
+export interface ZipsProjection {
+  type: 'batter' | 'pitcher'
+  war: number
+  fpts: number
+  fptsRate: number // FPTS/G for batters, FPTS/IP for pitchers
+  // Batter stats
+  pa?: number
+  hr?: number
+  r?: number
+  rbi?: number
+  sb?: number
+  avg?: number
+  obp?: number
+  slg?: number
+  ops?: number
+  wrcPlus?: number
+  // Pitcher stats
+  w?: number
+  qs?: number
+  era?: number
+  sv?: number
+  hld?: number
+  k?: number
+  ip?: number
+  bb9?: number
+  whip?: number
 }

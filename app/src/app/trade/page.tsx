@@ -2,13 +2,15 @@
 
 import { useState, useMemo } from 'react'
 import { usePlayerStore } from '@/lib/store'
-import { Search, Plus, X, ArrowLeftRight } from 'lucide-react'
+import { useHydration } from '@/lib/useHydration'
+import { Search, Plus, X, ArrowLeftRight, Loader2 } from 'lucide-react'
 import type { Player } from '@/types'
 
 const MY_FRANCHISE = 'Colin Wilson & Greg Holmes'
 
 export default function TradePage() {
   const { players, franchiseMappings } = usePlayerStore()
+  const hasHydrated = useHydration()
   const [myTeamPlayers, setMyTeamPlayers] = useState<Player[]>([])
   const [theirTeamPlayers, setTheirTeamPlayers] = useState<Player[]>([])
   const [selectedFranchise, setSelectedFranchise] = useState<string>('')
@@ -73,6 +75,15 @@ export default function TradePage() {
   const clearTrade = () => {
     setMyTeamPlayers([])
     setTheirTeamPlayers([])
+  }
+
+  if (!hasHydrated) {
+    return (
+      <div className="flex items-center justify-center py-12 gap-3">
+        <Loader2 className="w-5 h-5 animate-spin text-blue-500" />
+        <p className="text-gray-500 dark:text-gray-400">Loading data...</p>
+      </div>
+    )
   }
 
   if (players.length === 0) {

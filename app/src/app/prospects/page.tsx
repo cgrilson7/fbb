@@ -2,23 +2,26 @@
 
 import { useState, useMemo } from 'react'
 import { usePlayerStore } from '@/lib/store'
-import { Search, ChevronUp, ChevronDown, X } from 'lucide-react'
+import { useHydration } from '@/lib/useHydration'
+import { Search, ChevronUp, ChevronDown, X, Loader2 } from 'lucide-react'
 
 type ProspectType = 'all' | 'batting' | 'pitching'
-type SortField = 'rank' | 'fullName' | 'team' | 'age' | 'level' | 'hkbRank' | 'hkbValue' | 'avg' | 'ops' | 'homeRuns' | 'stolenBases' | 'era' | 'whip' | 'strikeOuts'
+type SortField = 'rank' | 'fullName' | 'team' | 'age' | 'level' | 'hkbRank' | 'hkbValue' | 'fvGrade' | 'fvRank' | 'avg' | 'ops' | 'homeRuns' | 'stolenBases' | 'era' | 'whip' | 'strikeOuts' | 'franchise'
 type SortOrder = 'asc' | 'desc'
 
 export default function ProspectsPage() {
-  const { battingProspects, pitchingProspects, players, hkbPlayers } = usePlayerStore()
+  const { battingProspects, pitchingProspects, players, hkbPlayers, fvRankings, franchiseMappings } = usePlayerStore()
+  const hasHydrated = useHydration()
   const [search, setSearch] = useState('')
   const [prospectType, setProspectType] = useState<ProspectType>('all')
   const [levelFilter, setLevelFilter] = useState('')
   const [teamFilter, setTeamFilter] = useState('')
+  const [franchiseFilter, setFranchiseFilter] = useState('')
   const [showAvailableOnly, setShowAvailableOnly] = useState(false)
   const [sortField, setSortField] = useState<SortField>('hkbRank')
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc')
 
-  // Combine prospects with availability and HKB data
+  // Combine prospects with availability and HKB data, filtering out MLB-level players
   const enrichedProspects = useMemo(() => {
     const allProspects = [
       ...battingProspects.map(p => ({ ...p, type: 'batting' as const })),
@@ -28,20 +31,50 @@ export default function ProspectsPage() {
     // Create lookup maps
     const playerMap = new Map(players.map(p => [p.normalizedName, p]))
     const hkbMap = new Map(hkbPlayers.map(p => [p.normalizedName, p]))
+    const fvMap = new Map(fvRankings.map(p => [p.normalizedName, p]))
+    const franchiseMap = new Map(franchiseMappings.map(m => [m.shortCode, m.fullName]))
 
-    return allProspects.map(prospect => {
-      const player = playerMap.get(prospect.normalizedName)
-      const hkb = hkbMap.get(prospect.normalizedName)
+    return allProspects
+      .filter(p => {
+        // Filter out explicit MLB level
+        if (p.level === 'MLB') return false
+        // Filter out players whose HKB data marks them as MLB
+        const hkb = hkbMap.get(p.normalizedName)
+        if (hkb?.level === 'MLB') return false
+        // Filter out players whose FV data marks them as MLB
+        const fv = fvMap.get(p.normalizedName)
+        if (fv?.highestLevel === 'MLB') return false
+        return true
+      })
+      .map(prospect => {
+        const player = playerMap.get(prospect.normalizedName)
+        const hkb = hkbMap.get(prospect.normalizedName)
+        const fv = fvMap.get(prospect.normalizedName)
 
-      return {
-        ...prospect,
-        isAvailable: player?.isAvailable ?? true,
-        status: player?.status ?? 'Unknown',
-        hkbRank: hkb?.rank ?? null,
-        hkbValue: hkb?.value ?? null,
-      }
-    })
-  }, [battingProspects, pitchingProspects, players, hkbPlayers])
+        // Clean up "ALL (X)" level labels to show "Multi (X)"
+        const cleanLevel = prospect.level.startsWith('ALL')
+          ? prospect.level.replace('ALL', 'Multi')
+          : prospect.level
+
+        const status = player?.status ?? 'Unknown'
+        const franchise = franchiseMap.get(status) || status
+
+        return {
+          ...prospect,
+          level: cleanLevel,
+          isAvailable: player?.isAvailable ?? true,
+          status,
+          franchise,
+          hkbRank: hkb?.rank ?? null,
+          hkbValue: hkb?.value ?? null,
+          fvGrade: fv?.fv ?? null,
+          fvRank: fv?.rank ?? null,
+          fvETA: fv?.eta ?? null,
+          fvHighestLevel: fv?.highestLevel ?? null,
+          fvPosition: fv?.position ?? null,
+        }
+      })
+  }, [battingProspects, pitchingProspects, players, hkbPlayers, fvRankings, franchiseMappings])
 
   // Get unique levels and teams
   const levels = useMemo(() => {
@@ -52,6 +85,11 @@ export default function ProspectsPage() {
   const teams = useMemo(() => {
     const allTeams = new Set(enrichedProspects.map(p => p.team).filter(Boolean))
     return Array.from(allTeams).sort()
+  }, [enrichedProspects])
+
+  const franchises = useMemo(() => {
+    const allFranchises = new Set(enrichedProspects.map(p => p.franchise).filter(f => f && f !== 'Unknown' && f !== 'Free Agent' && !f.includes('<small>')))
+    return Array.from(allFranchises).sort()
   }, [enrichedProspects])
 
   // Filter and sort prospects
@@ -82,6 +120,11 @@ export default function ProspectsPage() {
       result = result.filter(p => p.team === teamFilter)
     }
 
+    // Franchise filter
+    if (franchiseFilter) {
+      result = result.filter(p => p.franchise === franchiseFilter)
+    }
+
     // Available only
     if (showAvailableOnly) {
       result = result.filter(p => p.isAvailable)
@@ -106,6 +149,10 @@ export default function ProspectsPage() {
           aVal = a.level
           bVal = b.level
           break
+        case 'franchise':
+          aVal = a.franchise
+          bVal = b.franchise
+          break
         case 'rank':
           aVal = a.rank
           bVal = b.rank
@@ -121,6 +168,14 @@ export default function ProspectsPage() {
         case 'hkbValue':
           aVal = a.hkbValue
           bVal = b.hkbValue
+          break
+        case 'fvGrade':
+          aVal = a.fvGrade
+          bVal = b.fvGrade
+          break
+        case 'fvRank':
+          aVal = a.fvRank
+          bVal = b.fvRank
           break
         case 'avg':
           aVal = a.type === 'batting' ? (a as typeof a & { avg: number }).avg : null
@@ -168,7 +223,7 @@ export default function ProspectsPage() {
     })
 
     return result
-  }, [enrichedProspects, prospectType, search, levelFilter, teamFilter, showAvailableOnly, sortField, sortOrder])
+  }, [enrichedProspects, prospectType, search, levelFilter, teamFilter, franchiseFilter, showAvailableOnly, sortField, sortOrder])
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -176,7 +231,7 @@ export default function ProspectsPage() {
     } else {
       setSortField(field)
       // Default to desc for value stats, asc for ranks
-      setSortOrder(['hkbValue', 'ops', 'avg', 'homeRuns', 'stolenBases', 'strikeOuts'].includes(field) ? 'desc' : 'asc')
+      setSortOrder(['hkbValue', 'fvGrade', 'ops', 'avg', 'homeRuns', 'stolenBases', 'strikeOuts'].includes(field) ? 'desc' : 'asc')
     }
   }
 
@@ -192,9 +247,19 @@ export default function ProspectsPage() {
     setShowAvailableOnly(false)
     setLevelFilter('')
     setTeamFilter('')
+    setFranchiseFilter('')
   }
 
-  const hasFilters = search || showAvailableOnly || levelFilter || teamFilter
+  const hasFilters = search || showAvailableOnly || levelFilter || teamFilter || franchiseFilter
+
+  if (!hasHydrated) {
+    return (
+      <div className="flex items-center justify-center py-12 gap-3">
+        <Loader2 className="w-5 h-5 animate-spin text-blue-500" />
+        <p className="text-gray-500 dark:text-gray-400">Loading data...</p>
+      </div>
+    )
+  }
 
   if (battingProspects.length === 0 && pitchingProspects.length === 0) {
     return (
@@ -273,6 +338,18 @@ export default function ProspectsPage() {
             ))}
           </select>
 
+          {/* Franchise filter */}
+          <select
+            value={franchiseFilter}
+            onChange={(e) => setFranchiseFilter(e.target.value)}
+            className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+          >
+            <option value="">All franchises</option>
+            {franchises.map(f => (
+              <option key={f} value={f}>{f}</option>
+            ))}
+          </select>
+
           {/* Available only */}
           <label className="flex items-center gap-2 cursor-pointer">
             <input
@@ -310,6 +387,18 @@ export default function ProspectsPage() {
                 </th>
                 <th
                   className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600"
+                  onClick={() => handleSort('fvGrade')}
+                >
+                  FV <SortIcon field="fvGrade" />
+                </th>
+                <th
+                  className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600"
+                  onClick={() => handleSort('fvRank')}
+                >
+                  FV Rk <SortIcon field="fvRank" />
+                </th>
+                <th
+                  className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600"
                   onClick={() => handleSort('fullName')}
                 >
                   Name <SortIcon field="fullName" />
@@ -331,6 +420,12 @@ export default function ProspectsPage() {
                   onClick={() => handleSort('age')}
                 >
                   Age <SortIcon field="age" />
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  ETA
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  Pos
                 </th>
                 <th
                   className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600"
@@ -400,6 +495,12 @@ export default function ProspectsPage() {
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                   Status
                 </th>
+                <th
+                  className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600"
+                  onClick={() => handleSort('franchise')}
+                >
+                  Franchise <SortIcon field="franchise" />
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
@@ -415,6 +516,22 @@ export default function ProspectsPage() {
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                     {prospect.hkbRank ?? '—'}
                   </td>
+                  <td className="px-4 py-3 text-sm font-medium">
+                    {prospect.fvGrade ? (
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-bold ${
+                        prospect.fvGrade >= 60
+                          ? 'bg-purple-100 text-purple-800 dark:bg-purple-800 dark:text-purple-100'
+                          : prospect.fvGrade >= 50
+                          ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-800 dark:text-indigo-100'
+                          : 'bg-gray-100 text-gray-800 dark:bg-gray-600 dark:text-gray-100'
+                      }`}>
+                        {prospect.fvGrade}
+                      </span>
+                    ) : '—'}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+                    {prospect.fvRank ?? '—'}
+                  </td>
                   <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">
                     {prospect.fullName}
                   </td>
@@ -426,6 +543,12 @@ export default function ProspectsPage() {
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
                     {prospect.age}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+                    {prospect.fvETA ?? '—'}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+                    {prospect.fvPosition ?? '—'}
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
                     {prospect.rank}
@@ -479,6 +602,9 @@ export default function ProspectsPage() {
                     }`}>
                       {prospect.isAvailable ? 'FA' : prospect.status}
                     </span>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+                    {prospect.isAvailable ? '' : prospect.franchise}
                   </td>
                 </tr>
               ))}

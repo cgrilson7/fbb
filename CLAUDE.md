@@ -52,11 +52,11 @@ Merges FanGraphs projections with blocking/roster data into master database. Nor
 Generates strategy-weighted draft boards. Takes strategy name as CLI argument. Calculates z-scores for all stats, applies strategy-specific weights (positive for targets, negative for punts), assigns tiers by percentile.
 
 **Strategies:**
-- `volume_power`: R, HR, RBI + QS, K, ERA, WHIP (punt SB, SV, HLD)
-- `power_rp`: HR, RBI, SLG + SV, HLD, ERA, WHIP (punt SB, QS)
-- `speed_rates`: SB, AVG, OBP + ERA, WHIP, K (punt HR, RBI, QS)
+- `volume_power`: R, HR, RBI + QS, K, ERA, H/IP (punt SB, SV, HLD)
+- `power_rp`: HR, RBI, SLG + SV, HLD, ERA, H/IP (punt SB, QS)
+- `speed_rates`: SB, AVG, OBP + ERA, H/IP, K (punt HR, RBI, QS)
 - `balanced`: All categories equally weighted
-- `elite_bullpen`: SV, HLD, ERA, WHIP + AVG, OBP (punt HR, QS, K)
+- `elite_bullpen`: SV, HLD, ERA, H/IP + AVG, OBP (punt HR, QS, K)
 
 ### generate_fbb_page.py
 Creates interactive HTML dashboard with Alpine.js. Features: strategy tabs, sortable tables, search/filter (hide free agents, hide partial blocks), color-coded rows by status.
@@ -66,10 +66,88 @@ Historical league analysis. Creates pivot tables, calculates category correlatio
 
 ## League Structure
 
-- **14 categories**: R, HR, RBI, SB, AVG, OBP, SLG (batting) + QS, SV, HLD, BB9, K, ERA, WHIP (pitching)
-- **12 teams**: Rotisserie format where each category ranks 1-12, points sum to total score
+- **Format**: Full Rotisserie dynasty league on Fantrax
+- **Teams**: Minimum 10 franchises (currently 14 with 2026 expansion adds), with expansion process defined in constitution
+- **14 categories**: HR, RBI, R, SB, AVG, OBP, SLG (batting) + K, QS, SV, HLD, ERA, BB/9, H/IP (pitching)
+- **Scoring**: Teams ranked 1st to last in each category; points = number of teams in league that year for 1st, 1 for last. Most total points wins.
+- **Season**: Ends at conclusion of game 162 of MLB regular season (tie-break games don't count)
 
-## Key Thresholds
+## Salary Cap & Budget
+
+- Base salary cap: $150MM (2024), increases $10MM/year ($160MM in 2025, $170MM in 2026, etc.)
+- All contracts in $100k increments, $100k minimum salary
+- Budget can be traded between franchises up to 3 years in the future
+- Unused budget does NOT roll over between years
+- 3x salary cap checks per season: 5/31 (25% weight), 7/31 (25%), end of last FA period (50%)
+- 200% of cap = hard cap (franchise ineligible for remainder of season)
+- Fines reduce budget for following 3 years
+
+## Rosters
+
+- **Active roster (35 spots)**: C, 1B, 2B, 3B, SS, MI, CI, LF, CF, RF, OF, DH, UTIL, 10x Pitchers, 12x Reserve
+- **Farm System**: 15 minor league players (no salary counted against cap)
+- **IL**: 5x Short Term IL + unlimited Long Term IL (60-day IL in real life)
+- **Injured Player Salary Relief** (effective 2026): Up to 3x players/season can be designated for salary relief if on 60-day IL IRL; player becomes ineligible for rest of season, salary removed from cap
+- **1x Amnesty Drop per year**: Drop a player without dead cap penalty; must be used before 2nd salary cap check (7/31), declared via WhatsApp. Cooldown = years remaining on contract minus 1.
+
+## Lineup & Eligibility
+
+- **Lineup setting periods**: Mon-Thu and Fri-Sun; changes allowed before games on Monday and Friday
+- **Position eligibility**: 15 games at position previous season (10 games in-season to gain eligibility)
+- **Minimums**: 1,000 IP and 5,200 PA per team per season (rate stats ineligible if not met)
+
+## Contracts & Player Acquisition
+
+### Young Players Salary Structure
+- Prospect (farm system): Free
+- Rookie: $500k
+- Second Year: $1MM
+- Third Year: $1.5MM
+- Teams retain control through player's 3rd MLB season
+
+### Off-Season Free Agency (Section 4.3)
+- Blind auction via email to dynastyleaguebids@gmail.com
+- Winning bid determined by total money spent (not AAV)
+- Minimum AAV rules: 1yr=no min, 2yr=$2MM, 3yr=$5MM, 4yr=$9MM, 5yr=$14MM, 6-8yr=$20MM, 9+yr=$30MM
+- First 12 years of contract determine winner even if contract is longer
+- **Hometown Discount** (20%): Available if player was on roster since August of prior-to-last season; 21hr declaration window; usable once, then 2-year cooldown
+- **Restricted Free Agents**: Match winning contract for player on roster entire prior season; 21hr window; max 5 RFAs per franchise per off-season. Can also use RFA designation in Roster Fill-Out Draft (72hrs prior, $5MM/2yr contract)
+
+### In-Season Free Agency (Section 4.6)
+- Weekly FAAB blind bids due Sunday 4pm EST, $100k increments
+- All in-season contracts are 1 year, count against salary cap
+- Prospects don't count against cap (bids for tie-breaking only)
+
+### Dropped Players & Dead Cap (Section 4.8)
+- Dropping a player on a multi-year contract incurs dead cap:
+  - Year dropped: 80% of AAV
+  - Following year: 60%
+  - 3rd year and beyond: 40%
+- Re-adding same player = same original contract terms
+
+## Trades (Section 4.7)
+
+- Trades open year-round EXCEPT: 2 weeks after MLB trade deadline through 1 week after World Series
+- No league vetoes; collusion concerns trigger rationale write-ups
+- Budget can be traded up to 3 years in the future
+- Off-season trades can result in temporarily ineligible rosters (must be eligible 3 weeks before Opening Day)
+
+## Expansion (Section 5.2)
+
+- Commissioner approval + simple majority vote to add new owners
+- **Expansion Draft**: Existing teams protect 5 players fully + 5 partially (20% salary premium to draft partial); expansion team picks 1 player from each existing franchise
+- **Expansion Token**: One-time right to win any FA at 10% premium over winning bid; usable in first 2 off-seasons; Hometown Discount takes priority over token
+
+## Penalties (Section 6.5)
+
+- Starting IL player >4 lineup periods: no FA bids until fixed + 4 more periods
+- Healthy player on IL >2 lineup periods: no FA bids until 1 week after activation
+- MLB player left in farm system >2 lineup periods: all transactions locked
+- Not meeting IP/PA minimums: rate stats = last place + $10MM cap loss
+- Trade collusion: escalating penalties up to league removal
+- Salary cap overages: escalating from draft position loss to franchise ineligibility
+
+## Key Thresholds (Draft Board Analysis)
 
 - Batters: 400+ PA to qualify
 - Starters: 100+ IP (or 40+ IP for reliever-heavy strategies)
@@ -114,7 +192,8 @@ Colin Wilson & Greg Holmes (status code: "C&G")
 
 When answering questions about league rules, contracts, salaries, free agency, trades, penalties, or any other constitutional matters:
 
-1. **Always read `constitution.pdf`** before answering - never rely on memory or assumptions
-2. The constitution is ~7,000 tokens and covers: rosters, salary caps, contracts, free agency (off-season and in-season), trades, farm system, young player salary structure, expansion, penalties, and more
+1. **Always read `constitution_new.pdf`** before answering - never rely on memory or assumptions
+2. The constitution has 6 sections: General Info, Rosters, League Scoring, Transactions & Contracts, Ownership, Administrative Items
 3. Cite the specific section (e.g., "Section 4.2 Young Players Salary Structure") when providing answers
 4. If the constitution is ambiguous or doesn't cover the scenario, say so explicitly
+5. Check Section 6.6 (Tracking Rules Changes) for any recent rule votes that may override earlier sections

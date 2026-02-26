@@ -2,10 +2,12 @@
 
 import { useState } from 'react'
 import { usePlayerStore } from '@/lib/store'
-import { Check, Edit2, Save, X } from 'lucide-react'
+import { useHydration } from '@/lib/useHydration'
+import { Check, Edit2, Save, X, Loader2 } from 'lucide-react'
 
 export default function FranchisesPage() {
   const { franchiseMappings, setFranchiseMapping, players } = usePlayerStore()
+  const hasHydrated = useHydration()
   const [editingCode, setEditingCode] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
 
@@ -33,6 +35,15 @@ export default function FranchisesPage() {
   const handleCancel = () => {
     setEditingCode(null)
     setEditValue('')
+  }
+
+  if (!hasHydrated) {
+    return (
+      <div className="flex items-center justify-center py-12 gap-3">
+        <Loader2 className="w-5 h-5 animate-spin text-blue-500" />
+        <p className="text-gray-500 dark:text-gray-400">Loading data...</p>
+      </div>
+    )
   }
 
   return (

@@ -1,9 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Upload, Check, AlertCircle, FileText, Loader2 } from 'lucide-react'
 import { usePlayerStore } from '@/lib/store'
-import { parseCSV, detectFileType, FileType } from '@/lib/csvParser'
+import { useHydration } from '@/lib/useHydration'
+import { parseCSV, detectFileType, fetchAndLoadDefaults, FileType } from '@/lib/csvParser'
 
 interface UploadStatus {
   type: FileType
@@ -18,7 +19,24 @@ const fileTypes: { type: FileType; label: string; description: string }[] = [
   { type: 'salaries', label: 'salaries.csv', description: 'League contracts' },
   { type: 'battingProspects', label: 'batting_prospects.csv', description: 'MiLB batting stats' },
   { type: 'pitchingProspects', label: 'pitching_prospects.csv', description: 'MiLB pitching stats' },
+  { type: 'zipsBatters', label: 'zips_batters.csv', description: 'ZiPS batter projections' },
+  { type: 'zipsPitchers', label: 'zips_pitchers.csv', description: 'ZiPS pitcher projections' },
+  { type: 'freeAgency', label: 'free_agency.csv', description: 'Free agent auction tracker' },
+  { type: 'fvRankings', label: 'fv_rankings.csv', description: 'FanGraphs Future Value rankings' },
 ]
+
+// Map file types to store state keys
+const storeKeyMap: Record<FileType, string> = {
+  players: 'rawPlayers',
+  hkb: 'hkbPlayers',
+  salaries: 'salaries',
+  battingProspects: 'battingProspects',
+  pitchingProspects: 'pitchingProspects',
+  zipsBatters: 'zipsBatters',
+  zipsPitchers: 'zipsPitchers',
+  freeAgency: 'freeAgentEntries',
+  fvRankings: 'fvRankings',
+}
 
 export default function UploadPage() {
   const [uploads, setUploads] = useState<Record<FileType, UploadStatus>>({
@@ -27,11 +45,48 @@ export default function UploadPage() {
     salaries: { type: 'salaries', status: 'pending' },
     battingProspects: { type: 'battingProspects', status: 'pending' },
     pitchingProspects: { type: 'pitchingProspects', status: 'pending' },
+    zipsBatters: { type: 'zipsBatters', status: 'pending' },
+    zipsPitchers: { type: 'zipsPitchers', status: 'pending' },
+    freeAgency: { type: 'freeAgency', status: 'pending' },
+    fvRankings: { type: 'fvRankings', status: 'pending' },
   })
 
-  const { setPlayers, setHKB, setSalaries, setBattingProspects, setPitchingProspects, joinData } = usePlayerStore()
+  const store = usePlayerStore()
+  const { setPlayers, setHKB, setSalaries, setBattingProspects, setPitchingProspects, setZipsBatters, setZipsPitchers, setFreeAgentEntries, setFVRankings, joinData } = store
+  const hasHydrated = useHydration()
 
   const [isJoining, setIsJoining] = useState(false)
+
+  const [autoFetching, setAutoFetching] = useState(false)
+
+  // After hydration, show green checkmarks for already-persisted data
+  useEffect(() => {
+    if (!hasHydrated) return
+    setUploads(prev => {
+      const next = { ...prev }
+      for (const ft of fileTypes) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const arr = (store as any)[storeKeyMap[ft.type]] as unknown[]
+        if (arr && arr.length > 0 && next[ft.type].status === 'pending') {
+          next[ft.type] = { type: ft.type, status: 'uploaded', count: arr.length }
+        }
+      }
+      return next
+    })
+  }, [hasHydrated, store])
+
+  // Auto-fetch bundled CSV data if store is empty after hydration
+  useEffect(() => {
+    if (!hasHydrated) return
+    if (store.rawPlayers.length > 0) return
+    setAutoFetching(true)
+    fetchAndLoadDefaults(usePlayerStore, (type, count) => {
+      setUploads(prev => ({
+        ...prev,
+        [type]: { type, status: 'uploaded', count }
+      }))
+    }).finally(() => setAutoFetching(false))
+  }, [hasHydrated, store.rawPlayers.length])
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files
@@ -54,7 +109,8 @@ export default function UploadPage() {
 
       try {
         console.log(`Parsing ${file.name} as ${detectedType}...`)
-        const data = await parseCSV(file, detectedType)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const data: any[] = await parseCSV(file, detectedType)
         console.log(`Parsed ${data.length} records from ${file.name}`, data.slice(0, 2))
 
         switch (detectedType) {
@@ -72,6 +128,18 @@ export default function UploadPage() {
             break
           case 'pitchingProspects':
             setPitchingProspects(data)
+            break
+          case 'zipsBatters':
+            setZipsBatters(data)
+            break
+          case 'zipsPitchers':
+            setZipsPitchers(data)
+            break
+          case 'freeAgency':
+            setFreeAgentEntries(data)
+            break
+          case 'fvRankings':
+            setFVRankings(data)
             break
         }
 
@@ -99,11 +167,8 @@ export default function UploadPage() {
 
     // After all uploads, join the data
     setIsJoining(true)
-    // Use setTimeout to allow UI to update before heavy computation
-    setTimeout(() => {
-      joinData()
-      setIsJoining(false)
-    }, 100)
+    joinData()
+    setIsJoining(false)
   }
 
   const uploadedCount = Object.values(uploads).filter(u => u.status === 'uploaded').length
@@ -188,11 +253,19 @@ export default function UploadPage() {
       </div>
 
       {/* Progress Summary */}
+      {autoFetching && (
+        <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4 flex items-center gap-3">
+          <Loader2 className="w-5 h-5 text-blue-600 dark:text-blue-400 animate-spin" />
+          <p className="text-blue-800 dark:text-blue-300">
+            Loading bundled data files...
+          </p>
+        </div>
+      )}
       {isJoining && (
         <div className="bg-yellow-50 dark:bg-yellow-900/20 rounded-lg p-4 flex items-center gap-3">
           <Loader2 className="w-5 h-5 text-yellow-600 dark:text-yellow-400 animate-spin" />
           <p className="text-yellow-800 dark:text-yellow-300">
-            Joining data sources and matching player names...
+            Joining data sources...
           </p>
         </div>
       )}

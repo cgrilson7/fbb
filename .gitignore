@@ -7,6 +7,8 @@ __pycache__/
 # Next.js app
 app/node_modules/
 app/.next/
+app/out/
+app/tsconfig.tsbuildinfo
 
 # Generated files (output of pipeline)
 all_players.csv
@@ -21,3 +23,6 @@ available_*.csv
 fa_through_*.csv
 prospects_filtered.csv
 strategy_session_*.md
+
+# Local Netlify folder
+.netlify

@@ -5,18 +5,27 @@ import type {
   HKBPlayer,
   SalaryEntry,
   BattingProspect,
-  PitchingProspect
+  PitchingProspect,
+  ZipsBatter,
+  ZipsPitcher,
+  FreeAgentEntry,
+  FVRanking
 } from '@/types'
 
-export type FileType = 'players' | 'hkb' | 'salaries' | 'battingProspects' | 'pitchingProspects'
+export type FileType = 'players' | 'hkb' | 'salaries' | 'battingProspects' | 'pitchingProspects' | 'zipsBatters' | 'zipsPitchers' | 'freeAgency' | 'fvRankings'
 
 export function detectFileType(filename: string): FileType | null {
   const lower = filename.toLowerCase()
   // Check harryknowsball FIRST (contains "all" which would match players)
   if (lower.includes('harryknowsball') || lower.includes('hkb')) return 'hkb'
   if (lower.includes('salaries') || lower.includes('salary')) return 'salaries'
+  if (lower.includes('fv') && lower.includes('rank')) return 'fvRankings'
+  if (lower.includes('free') && lower.includes('agen')) return 'freeAgency'
   if (lower.includes('batting') && lower.includes('prospect')) return 'battingProspects'
   if (lower.includes('pitching') && lower.includes('prospect')) return 'pitchingProspects'
+  // ZiPS projections
+  if (lower.includes('zips') && lower.includes('batter')) return 'zipsBatters'
+  if (lower.includes('zips') && lower.includes('pitcher')) return 'zipsPitchers'
   // Check "all" last since it's a common substring
   if (lower.includes('all') && lower.endsWith('.csv')) return 'players'
   return null
@@ -40,10 +49,21 @@ export function parseCSV<T>(file: File, type: FileType): Promise<T[]> {
   })
 }
 
+// Fantrax IDs of duplicate/lesser players who share names with stars
+const EXCLUDED_PLAYER_IDS = new Set([
+  '*06lfx*', // Julio Rodriguez (HOU, RP) — not the SEA OF
+  '*04awg*', // Julio Rodriguez (KC, C) — not the SEA OF
+  '*06qx9*', // Jose Ramirez (DET, RP) — not the CLE 3B
+  '*06rse*', // Jose Ramirez (DET, RF/OF) — not the CLE 3B
+  '*0375c*', // Edwin Diaz (HOU, 3B/SS) — not the LAD RP
+])
+
 function transformData(rows: Record<string, string>[], type: FileType): unknown[] {
   switch (type) {
     case 'players':
-      return rows.map(transformPlayer)
+      return rows
+        .filter(row => !EXCLUDED_PLAYER_IDS.has(row['ID'] || ''))
+        .map(transformPlayer)
     case 'hkb':
       return rows.map(transformHKB)
     case 'salaries':
@@ -52,6 +72,14 @@ function transformData(rows: Record<string, string>[], type: FileType): unknown[
       return rows.map(transformBattingProspect)
     case 'pitchingProspects':
       return rows.map(transformPitchingProspect)
+    case 'zipsBatters':
+      return rows.map(transformZipsBatter)
+    case 'zipsPitchers':
+      return rows.map(transformZipsPitcher)
+    case 'freeAgency':
+      return rows.map(transformFreeAgency)
+    case 'fvRankings':
+      return rows.map(transformFVRanking)
     default:
       return rows
   }
@@ -83,6 +111,12 @@ function transformPlayer(row: Record<string, string>): Player {
     prospectRank: null,
     prospectLevel: null,
     prospectStats: null,
+    fvRank: null,
+    fvGrade: null,
+    fvETA: null,
+    fvHighestLevel: null,
+    fvPosition: null,
+    zipsProjection: null,
     // Derived
     isAvailable: status === 'FA',
     matchConfidence: 1,
@@ -148,10 +182,11 @@ function transformSalary(row: Record<string, string>): SalaryEntry {
     franchise: getValue(['Franchise', 'Owner']).trim(),
     contractType: getValue(['Contract Type']).trim(),
     salary,
-    contractLength: parseInt(getValue(['Contract Length']) || '0', 10),
+    contractLength: parseInt((getValue(['Contract Length']) || '0').replace(/[$\s]/g, ''), 10) || 0,
     contractStarts: contractStartsRaw ? parseInt(contractStartsRaw, 10) : 0,
     contractEnds: contractEndsRaw ? parseInt(contractEndsRaw, 10) : 0,
     salaryByYear,
+    acquisitionDate: getValue(['Acq. Date', 'Acquisition Date']).trim(),
     normalizedName: normalize(playerName)
   }
 }
@@ -200,6 +235,165 @@ function transformPitchingProspect(row: Record<string, string>): PitchingProspec
     walks: parseInt(row['walks'] || '0', 10),
     normalizedName: normalize(fullName)
   }
+}
+
+function transformZipsBatter(row: Record<string, string>): ZipsBatter {
+  const name = row['Name'] || ''
+  return {
+    name,
+    team: row['Team'] || '',
+    pa: parseInt(row['PA'] || '0', 10),
+    hr: parseInt(row['HR'] || '0', 10),
+    r: parseInt(row['R'] || '0', 10),
+    rbi: parseInt(row['RBI'] || '0', 10),
+    sb: parseInt(row['SB'] || '0', 10),
+    avg: parseFloat(row['AVG'] || '0'),
+    obp: parseFloat(row['OBP'] || '0'),
+    slg: parseFloat(row['SLG'] || '0'),
+    ops: parseFloat(row['OPS'] || '0'),
+    wrcPlus: parseFloat(row['wRC+'] || '0'),
+    war: parseFloat(row['WAR'] || '0'),
+    fpts: parseFloat(row['FPTS'] || '0'),
+    fptsPerG: parseFloat(row['FPTS/G'] || '0'),
+    normalizedName: normalize(name)
+  }
+}
+
+function transformZipsPitcher(row: Record<string, string>): ZipsPitcher {
+  const name = row['Name'] || ''
+  return {
+    name,
+    team: row['Team'] || '',
+    w: parseInt(row['W'] || '0', 10),
+    qs: parseInt(row['QS'] || '0', 10),
+    era: parseFloat(row['ERA'] || '0'),
+    sv: parseInt(row['SV'] || '0', 10),
+    hld: parseInt(row['HLD'] || '0', 10),
+    ip: parseFloat(row['IP'] || '0'),
+    k: parseInt(row['SO'] || '0', 10),
+    bb9: parseFloat(row['BB/9'] || '0'),
+    whip: parseFloat(row['WHIP'] || '0'),
+    war: parseFloat(row['WAR'] || '0'),
+    fpts: parseFloat(row['FPTS'] || '0'),
+    fptsPerIP: parseFloat(row['FPTS/IP'] || '0'),
+    normalizedName: normalize(name)
+  }
+}
+
+function transformFreeAgency(row: Record<string, string>): FreeAgentEntry {
+  // Fuzzy column lookup — handles extra spaces and ? in headers
+  const getCol = (keys: string[]): string => {
+    for (const key of keys) {
+      if (row[key] !== undefined) return row[key]
+    }
+    // Try trimmed match
+    const found = Object.keys(row).find(k =>
+      keys.some(key => k.trim().toLowerCase() === key.toLowerCase())
+    )
+    return found ? row[found] : ''
+  }
+  const playerName = getCol(['Player Name'])
+  const rfa = getCol(['RFA?', 'RFA']).trim().toUpperCase()
+  const hometown = getCol(['Hometown Discount Eligible']).trim().toUpperCase()
+  // Handle "2025 wRC+/ FIP-" with possible spaces
+  const projKey = Object.keys(row).find(k => k.includes('wRC+') || k.includes('FIP'))
+  return {
+    playerName,
+    auctionDate: getCol(['Auction Date']),
+    previousFranchise: getCol(['2025 Franchise']),
+    acquisitionDate: getCol(['Acquisition Date']),
+    fwar2024: parseNumber(getCol(['2024 fWAR'])),
+    projectedStat: projKey ? parseNumber(row[projKey]) : null,
+    isRFA: rfa === 'YES' || rfa === 'Y' || rfa === 'TRUE',
+    hometownEligible: hometown === 'YES' || hometown === 'Y' || hometown === 'TRUE',
+    winningFranchise: getCol(['Winning Franchise']),
+    winningContract: getCol(['Winning Contract']),
+    otherBids: getCol(['Other Bids']),
+    normalizedName: normalize(playerName)
+  }
+}
+
+function transformFVRanking(row: Record<string, string>): FVRanking {
+  const name = row['Name'] || ''
+  return {
+    rank: parseInt(row['Rk'] || '0', 10),
+    name,
+    team: row['Team'] || '',
+    age: parseNumber(row['Age']),
+    highestLevel: row['Highest Level'] || '',
+    position: row['Position'] || '',
+    eta: parseNumber(row['ETA']),
+    fv: parseInt(row['FV'] || '0', 10),
+    normalizedName: normalize(name)
+  }
+}
+
+export function parseCSVText<T>(text: string, type: FileType): T[] {
+  const results = Papa.parse(text, {
+    header: true,
+    skipEmptyLines: true,
+  })
+  return transformData(results.data as Record<string, string>[], type) as T[]
+}
+
+const DEFAULT_DATA_MANIFEST: { url: string; type: FileType }[] = [
+  { url: '/data/all.csv', type: 'players' },
+  { url: '/data/harryknowsball_players.csv', type: 'hkb' },
+  { url: '/data/salaries.csv', type: 'salaries' },
+  { url: '/data/batting_prospects.csv', type: 'battingProspects' },
+  { url: '/data/pitching_prospects.csv', type: 'pitchingProspects' },
+  { url: '/data/zips_batters.csv', type: 'zipsBatters' },
+  { url: '/data/zips_pitchers.csv', type: 'zipsPitchers' },
+  { url: '/data/free_agency.csv', type: 'freeAgency' },
+  { url: '/data/fv_rankings.csv', type: 'fvRankings' },
+]
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Store = any
+
+export async function fetchAndLoadDefaults(
+  store: Store,
+  onFileLoaded?: (type: FileType, count: number) => void
+): Promise<void> {
+  // Skip if data already exists (e.g. from IDB)
+  if (store.getState().rawPlayers.length > 0) return
+
+  const setterMap: Record<FileType, string> = {
+    players: 'setPlayers',
+    hkb: 'setHKB',
+    salaries: 'setSalaries',
+    battingProspects: 'setBattingProspects',
+    pitchingProspects: 'setPitchingProspects',
+    zipsBatters: 'setZipsBatters',
+    zipsPitchers: 'setZipsPitchers',
+    freeAgency: 'setFreeAgentEntries',
+    fvRankings: 'setFVRankings',
+  }
+
+  const results = await Promise.all(
+    DEFAULT_DATA_MANIFEST.map(async ({ url, type }) => {
+      try {
+        const res = await fetch(url)
+        if (!res.ok) return null
+        const text = await res.text()
+        const data = parseCSVText(text, type)
+        return { type, data }
+      } catch {
+        return null
+      }
+    })
+  )
+
+  for (const result of results) {
+    if (!result) continue
+    const setter = store.getState()[setterMap[result.type]]
+    if (typeof setter === 'function') {
+      setter(result.data)
+      onFileLoaded?.(result.type, result.data.length)
+    }
+  }
+
+  store.getState().joinData()
 }
 
 function parseNumber(value: string | undefined): number | null {
