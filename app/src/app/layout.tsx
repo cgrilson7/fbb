@@ -20,6 +20,7 @@ import {
   Sun
 } from 'lucide-react'
 import { useState, useEffect } from 'react'
+import AutoLoadProvider from '@/lib/AutoLoadProvider'
 
 const navItems = [
   { href: '/', label: 'Upload', icon: Upload },
@@ -94,9 +95,11 @@ export default function RootLayout({
             </div>
           </div>
         </nav>
-        <main className="max-w-7xl mx-auto px-4 py-6">
-          {children}
-        </main>
+        <AutoLoadProvider>
+          <main className="max-w-7xl mx-auto px-4 py-6">
+            {children}
+          </main>
+        </AutoLoadProvider>
       </body>
     </html>
   )

@@ -415,14 +415,8 @@ export async function fetchAndLoadDefaults(
     fpRankings: 'setFPRankings',
   }
 
-  // Only fetch files not already loaded from IDB
-  const state = store.getState()
-  const toFetch = DEFAULT_DATA_MANIFEST.filter(({ type }) => {
-    const existing = state[storeKeyMap[type]]
-    return !existing || !Array.isArray(existing) || existing.length === 0
-  })
-
-  if (toFetch.length === 0) return
+  // Always fetch all bundled files so deploys with updated CSVs take effect
+  const toFetch = DEFAULT_DATA_MANIFEST
 
   const results = await Promise.all(
     toFetch.map(async ({ url, type }) => {
