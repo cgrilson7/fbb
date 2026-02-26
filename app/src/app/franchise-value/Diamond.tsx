@@ -9,9 +9,18 @@ export interface PositionCard {
   totalFranchises: number
 }
 
+export interface SlotCandidate {
+  name: string
+  value: number
+}
+
 interface DiamondProps {
   positions: Record<string, PositionCard>
   mode?: 'roster' | 'bestLineup' | 'depthChart'
+  lockedSlots?: Record<string, string>
+  onToggleLock?: (slot: string) => void
+  slotCandidates?: Record<string, SlotCandidate[]>  // eligible players per slot
+  onAssignToSlot?: (playerName: string, slot: string) => void
 }
 
 // 8 standard positions for roster mode
@@ -64,12 +73,12 @@ function RankBadge({ rank, total, size = 'sm' }: { rank: number | null; total: n
   )
 }
 
-export default function Diamond({ positions, mode = 'roster' }: DiamondProps) {
+export default function Diamond({ positions, mode = 'roster', lockedSlots = {}, onToggleLock, slotCandidates = {}, onAssignToSlot }: DiamondProps) {
   const isLineup = mode === 'bestLineup'
   const isDepth = mode === 'depthChart'
   const coords = isDepth ? DEPTH_COORDS : isLineup ? LINEUP_COORDS : ROSTER_COORDS
   const vw = isDepth ? 900 : isLineup ? 700 : 600
-  const vh = isDepth ? 750 : 500
+  const vh = isDepth ? 750 : isLineup ? 520 : 500
   // Center X for diamond shape
   const cx = isDepth ? 450 : isLineup ? 350 : 300
 
@@ -164,8 +173,11 @@ export default function Diamond({ positions, mode = 'roster' }: DiamondProps) {
 
         if (isLineup) {
           const player = card.players[0]
+          const isLocked = pos in lockedSlots
+          const candidates = slotCandidates[pos] || []
+          const hasReassign = onAssignToSlot && candidates.length > 0
           const cardW = 115
-          const cardH = 48
+          const cardH = hasReassign ? 62 : 48
           return (
             <foreignObject
               key={pos}
@@ -174,14 +186,43 @@ export default function Diamond({ positions, mode = 'roster' }: DiamondProps) {
               width={cardW}
               height={cardH}
             >
-              <div className={`rounded shadow border p-1 text-[10px] leading-tight h-full flex flex-col justify-center ${
+              <div className={`rounded shadow border p-1 text-[10px] leading-tight h-full flex flex-col justify-center relative ${
                 player
-                  ? 'bg-white/95 dark:bg-gray-800/95 border-gray-200 dark:border-gray-600'
+                  ? isLocked
+                    ? 'bg-amber-50/95 dark:bg-amber-900/30 border-amber-400 dark:border-amber-500 border-2'
+                    : 'bg-white/95 dark:bg-gray-800/95 border-gray-200 dark:border-gray-600'
                   : 'bg-gray-100/80 dark:bg-gray-700/80 border-dashed border-gray-300 dark:border-gray-600'
               }`}>
                 <div className="flex items-center justify-between mb-0.5">
                   <span className="font-bold text-gray-500 dark:text-gray-400 text-[9px]">{label}</span>
-                  <RankBadge rank={card.leagueRank} total={card.totalFranchises} size="sm" />
+                  <div className="flex items-center gap-0.5">
+                    <RankBadge rank={card.leagueRank} total={card.totalFranchises} size="sm" />
+                    {player && onToggleLock && (
+                      <button
+                        onClick={() => onToggleLock(pos)}
+                        className={`w-4 h-4 flex items-center justify-center rounded-sm transition-colors ${
+                          isLocked
+                            ? 'text-amber-600 dark:text-amber-400 hover:text-amber-800'
+                            : 'text-gray-300 dark:text-gray-500 hover:text-gray-500 dark:hover:text-gray-300'
+                        }`}
+                        title={isLocked ? 'Unlock slot' : 'Lock player to slot'}
+                      >
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          {isLocked ? (
+                            <>
+                              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                              <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                            </>
+                          ) : (
+                            <>
+                              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                              <path d="M7 11V7a5 5 0 0 1 9.9-1"/>
+                            </>
+                          )}
+                        </svg>
+                      </button>
+                    )}
+                  </div>
                 </div>
                 {player ? (
                   <div className={`truncate ${player.isFarm ? 'italic text-gray-400 dark:text-gray-500' : 'text-gray-900 dark:text-white font-semibold'}`}>
@@ -190,6 +231,20 @@ export default function Diamond({ positions, mode = 'roster' }: DiamondProps) {
                   </div>
                 ) : (
                   <div className="text-gray-400 dark:text-gray-500 text-center">—</div>
+                )}
+                {hasReassign && (
+                  <select
+                    className="mt-0.5 w-full text-[9px] px-0.5 py-0 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300"
+                    value=""
+                    onChange={(e) => { if (e.target.value) onAssignToSlot(e.target.value, pos) }}
+                  >
+                    <option value="">{player ? 'Reassign...' : 'Assign...'}</option>
+                    {candidates.map(c => (
+                      <option key={c.name} value={c.name}>
+                        {c.name} ({c.value.toFixed(0)})
+                      </option>
+                    ))}
+                  </select>
                 )}
               </div>
             </foreignObject>

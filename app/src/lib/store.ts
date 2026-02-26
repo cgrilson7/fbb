@@ -15,6 +15,7 @@ import type {
   FreeAgentEntry,
   SalaryReliefDesignation,
   FVRanking,
+  FantasyProsRanking,
   RfoDraftPick
 } from '@/types'
 import { normalize } from './normalize'
@@ -53,6 +54,7 @@ interface PlayerStore {
   zipsPitchers: ZipsPitcher[]
   freeAgentEntries: FreeAgentEntry[]
   fvRankings: FVRanking[]
+  fpRankings: FantasyProsRanking[]
 
   // Joined data
   players: Player[]
@@ -94,6 +96,7 @@ interface PlayerStore {
   setZipsPitchers: (pitchers: ZipsPitcher[]) => void
   setFreeAgentEntries: (entries: FreeAgentEntry[]) => void
   setFVRankings: (rankings: FVRanking[]) => void
+  setFPRankings: (rankings: FantasyProsRanking[]) => void
 
   // Join data from all sources
   joinData: () => void
@@ -127,6 +130,7 @@ export const usePlayerStore = create<PlayerStore>()(
       zipsPitchers: [],
       freeAgentEntries: [],
       fvRankings: [],
+      fpRankings: [],
       players: [],
       salaryReliefDesignations: [],
       poolDrafted: [],
@@ -148,11 +152,12 @@ export const usePlayerStore = create<PlayerStore>()(
       setZipsPitchers: (pitchers) => set({ zipsPitchers: pitchers }),
       setFreeAgentEntries: (entries) => set({ freeAgentEntries: entries }),
       setFVRankings: (rankings) => set({ fvRankings: rankings }),
+      setFPRankings: (rankings) => set({ fpRankings: rankings }),
 
       // Join data from all sources
       joinData: () => {
         const state = get()
-        const { rawPlayers, hkbPlayers, salaries, battingProspects, pitchingProspects, zipsBatters, zipsPitchers, fvRankings, nameMappings, franchiseMappings } = state
+        const { rawPlayers, hkbPlayers, salaries, battingProspects, pitchingProspects, zipsBatters, zipsPitchers, fvRankings, fpRankings, nameMappings, franchiseMappings } = state
 
         // Create lookup maps
         const hkbMap = new Map<string, HKBPlayer>()
@@ -175,6 +180,9 @@ export const usePlayerStore = create<PlayerStore>()(
 
         const fvRankingMap = new Map<string, FVRanking>()
         fvRankings.forEach(p => fvRankingMap.set(p.normalizedName, p))
+
+        const fpRankingMap = new Map<string, FantasyProsRanking>()
+        fpRankings.forEach(p => fpRankingMap.set(p.normalizedName, p))
 
         // Apply user name mappings
         const nameMap = new Map<string, string>()
@@ -284,6 +292,11 @@ export const usePlayerStore = create<PlayerStore>()(
             }
           }
 
+          // FantasyPros ranking data
+          const fpRanking = fpRankingMap.get(normalizedName)
+          const fpRank = fpRanking?.rank ?? null
+          const fpPos = fpRanking?.pos ?? null
+
           // FV ranking data
           const fvRanking = fvRankingMap.get(normalizedName)
           const fvRank = fvRanking?.rank ?? null
@@ -307,6 +320,8 @@ export const usePlayerStore = create<PlayerStore>()(
             hkbRank,
             hkbValue,
             hkbLevel,
+            fpRank,
+            fpPos,
             franchise,
             contractType,
             contractLength,
@@ -444,6 +459,7 @@ export const usePlayerStore = create<PlayerStore>()(
         zipsPitchers: state.zipsPitchers,
         freeAgentEntries: state.freeAgentEntries,
         fvRankings: state.fvRankings,
+        fpRankings: state.fpRankings,
         salaryReliefDesignations: state.salaryReliefDesignations,
         poolDrafted: state.poolDrafted,
         poolUnavailable: state.poolUnavailable,

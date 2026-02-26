@@ -9,16 +9,18 @@ import type {
   ZipsBatter,
   ZipsPitcher,
   FreeAgentEntry,
-  FVRanking
+  FVRanking,
+  FantasyProsRanking
 } from '@/types'
 
-export type FileType = 'players' | 'hkb' | 'salaries' | 'battingProspects' | 'pitchingProspects' | 'zipsBatters' | 'zipsPitchers' | 'freeAgency' | 'fvRankings'
+export type FileType = 'players' | 'hkb' | 'salaries' | 'battingProspects' | 'pitchingProspects' | 'zipsBatters' | 'zipsPitchers' | 'freeAgency' | 'fvRankings' | 'fpRankings'
 
 export function detectFileType(filename: string): FileType | null {
   const lower = filename.toLowerCase()
   // Check harryknowsball FIRST (contains "all" which would match players)
   if (lower.includes('harryknowsball') || lower.includes('hkb')) return 'hkb'
   if (lower.includes('salaries') || lower.includes('salary')) return 'salaries'
+  if (lower.includes('fantasypros')) return 'fpRankings'
   if (lower.includes('fv') && lower.includes('rank')) return 'fvRankings'
   if (lower.includes('free') && lower.includes('agen')) return 'freeAgency'
   if (lower.includes('batting') && lower.includes('prospect')) return 'battingProspects'
@@ -80,6 +82,8 @@ function transformData(rows: Record<string, string>[], type: FileType): unknown[
       return rows.map(transformFreeAgency)
     case 'fvRankings':
       return rows.map(transformFVRanking)
+    case 'fpRankings':
+      return rows.filter(row => (row['PLAYER NAME'] || row['Player Name'] || '').trim() !== '').map(transformFPRanking)
     default:
       return rows
   }
@@ -111,6 +115,8 @@ function transformPlayer(row: Record<string, string>): Player {
     prospectRank: null,
     prospectLevel: null,
     prospectStats: null,
+    fpRank: null,
+    fpPos: null,
     fvRank: null,
     fvGrade: null,
     fvETA: null,
@@ -328,6 +334,32 @@ function transformFVRanking(row: Record<string, string>): FVRanking {
   }
 }
 
+function transformFPRanking(row: Record<string, string>): FantasyProsRanking {
+  const name = row['PLAYER NAME'] || row['Player Name'] || ''
+  const rawPos = row['POS'] || row['Pos'] || ''
+  // Strip trailing digits from position (e.g. "SS1" -> "SS", "OF3" -> "OF")
+  const pos = rawPos.replace(/\d+$/, '')
+  const ecrRaw = row['ECR VS. ADP'] || row['ECR VS ADP'] || ''
+  let ecrVsAdp: number | null = null
+  if (ecrRaw && ecrRaw !== '-') {
+    const parsed = parseInt(ecrRaw.replace('+', ''), 10)
+    if (!isNaN(parsed)) ecrVsAdp = parsed
+  }
+  return {
+    rank: parseInt(row['RK'] || row['Rank'] || '0', 10),
+    name,
+    team: row['TEAM'] || row['Team'] || '',
+    pos,
+    age: parseNumber(row['AGE'] || row['Age']),
+    best: parseNumber(row['BEST'] || row['Best']),
+    worst: parseNumber(row['WORST'] || row['Worst']),
+    avg: parseNumber(row['AVG.'] || row['Avg']),
+    stdDev: parseNumber(row['STD.DEV'] || row['Std Dev']),
+    ecrVsAdp,
+    normalizedName: normalize(name),
+  }
+}
+
 export function parseCSVText<T>(text: string, type: FileType): T[] {
   const results = Papa.parse(text, {
     header: true,
@@ -346,6 +378,7 @@ const DEFAULT_DATA_MANIFEST: { url: string; type: FileType }[] = [
   { url: '/data/zips_pitchers.csv', type: 'zipsPitchers' },
   { url: '/data/free_agency.csv', type: 'freeAgency' },
   { url: '/data/fv_rankings.csv', type: 'fvRankings' },
+  { url: '/data/fantasypros_dynasty_rankings.csv', type: 'fpRankings' },
 ]
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -355,8 +388,19 @@ export async function fetchAndLoadDefaults(
   store: Store,
   onFileLoaded?: (type: FileType, count: number) => void
 ): Promise<void> {
-  // Skip if data already exists (e.g. from IDB)
-  if (store.getState().rawPlayers.length > 0) return
+  // Map file types to store state keys for checking existing data
+  const storeKeyMap: Record<FileType, string> = {
+    players: 'rawPlayers',
+    hkb: 'hkbPlayers',
+    salaries: 'salaries',
+    battingProspects: 'battingProspects',
+    pitchingProspects: 'pitchingProspects',
+    zipsBatters: 'zipsBatters',
+    zipsPitchers: 'zipsPitchers',
+    freeAgency: 'freeAgentEntries',
+    fvRankings: 'fvRankings',
+    fpRankings: 'fpRankings',
+  }
 
   const setterMap: Record<FileType, string> = {
     players: 'setPlayers',
@@ -368,10 +412,20 @@ export async function fetchAndLoadDefaults(
     zipsPitchers: 'setZipsPitchers',
     freeAgency: 'setFreeAgentEntries',
     fvRankings: 'setFVRankings',
+    fpRankings: 'setFPRankings',
   }
 
+  // Only fetch files not already loaded from IDB
+  const state = store.getState()
+  const toFetch = DEFAULT_DATA_MANIFEST.filter(({ type }) => {
+    const existing = state[storeKeyMap[type]]
+    return !existing || !Array.isArray(existing) || existing.length === 0
+  })
+
+  if (toFetch.length === 0) return
+
   const results = await Promise.all(
-    DEFAULT_DATA_MANIFEST.map(async ({ url, type }) => {
+    toFetch.map(async ({ url, type }) => {
       try {
         const res = await fetch(url)
         if (!res.ok) return null

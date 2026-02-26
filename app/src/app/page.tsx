@@ -23,6 +23,7 @@ const fileTypes: { type: FileType; label: string; description: string }[] = [
   { type: 'zipsPitchers', label: 'zips_pitchers.csv', description: 'ZiPS pitcher projections' },
   { type: 'freeAgency', label: 'free_agency.csv', description: 'Free agent auction tracker' },
   { type: 'fvRankings', label: 'fv_rankings.csv', description: 'FanGraphs Future Value rankings' },
+  { type: 'fpRankings', label: 'fantasypros_dynasty_rankings.csv', description: 'FantasyPros dynasty rankings' },
 ]
 
 // Map file types to store state keys
@@ -36,6 +37,7 @@ const storeKeyMap: Record<FileType, string> = {
   zipsPitchers: 'zipsPitchers',
   freeAgency: 'freeAgentEntries',
   fvRankings: 'fvRankings',
+  fpRankings: 'fpRankings',
 }
 
 export default function UploadPage() {
@@ -49,10 +51,11 @@ export default function UploadPage() {
     zipsPitchers: { type: 'zipsPitchers', status: 'pending' },
     freeAgency: { type: 'freeAgency', status: 'pending' },
     fvRankings: { type: 'fvRankings', status: 'pending' },
+    fpRankings: { type: 'fpRankings', status: 'pending' },
   })
 
   const store = usePlayerStore()
-  const { setPlayers, setHKB, setSalaries, setBattingProspects, setPitchingProspects, setZipsBatters, setZipsPitchers, setFreeAgentEntries, setFVRankings, joinData } = store
+  const { setPlayers, setHKB, setSalaries, setBattingProspects, setPitchingProspects, setZipsBatters, setZipsPitchers, setFreeAgentEntries, setFVRankings, setFPRankings, joinData } = store
   const hasHydrated = useHydration()
 
   const [isJoining, setIsJoining] = useState(false)
@@ -140,6 +143,9 @@ export default function UploadPage() {
             break
           case 'fvRankings':
             setFVRankings(data)
+            break
+          case 'fpRankings':
+            setFPRankings(data)
             break
         }
 

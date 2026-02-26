@@ -29,6 +29,9 @@ export interface Player {
   fvETA: number | null
   fvHighestLevel: string | null
   fvPosition: string | null
+  // Joined from FantasyPros
+  fpRank: number | null
+  fpPos: string | null
   // Joined from ZiPS
   zipsProjection: ZipsProjection | null
   // Derived
@@ -226,6 +229,20 @@ export interface RfoDraftPick {
   franchise: string
   level: number
   round?: number
+}
+
+export interface FantasyProsRanking {
+  rank: number
+  name: string
+  team: string
+  pos: string
+  age: number | null
+  best: number | null
+  worst: number | null
+  avg: number | null
+  stdDev: number | null
+  ecrVsAdp: number | null
+  normalizedName: string
 }
 
 export interface ZipsProjection {

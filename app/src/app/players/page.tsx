@@ -7,7 +7,7 @@ import { Search, ChevronUp, ChevronDown, X, Loader2 } from 'lucide-react'
 import { FixedSizeList as List } from 'react-window'
 import type { Player } from '@/types'
 
-type SortField = 'name' | 'hkbRank' | 'hkbPosRank' | 'hkbValue' | 'age' | 'team' | 'position' | 'status' | 'zipsWar' | 'zipsFpts' | 'zipsFptsRate'
+type SortField = 'name' | 'hkbRank' | 'hkbPosRank' | 'hkbValue' | 'fpRank' | 'age' | 'team' | 'position' | 'status' | 'zipsWar' | 'zipsFpts' | 'zipsFptsRate'
 type SortOrder = 'asc' | 'desc'
 
 const ROW_HEIGHT = 40
@@ -21,6 +21,7 @@ const COL_STYLES = {
   pos: 'w-[80px] min-w-[80px]',
   age: 'w-[50px] min-w-[50px]',
   hkbVal: 'w-[80px] min-w-[80px]',
+  fpRank: 'w-[70px] min-w-[70px]',
   zipsWar: 'w-[80px] min-w-[80px]',
   zipsFpts: 'w-[90px] min-w-[90px]',
   status: 'w-[70px] min-w-[70px]',
@@ -126,10 +127,11 @@ export default function PlayersPage() {
       if (field === 'zipsFpts') return p.zipsProjection?.fpts ?? null
       if (field === 'zipsFptsRate') return p.zipsProjection?.fptsRate ?? null
       if (field === 'hkbPosRank') return posRankMap?.get(p.normalizedName) ?? null
+      if (field === 'fpRank') return p.fpRank
       return null
     }
 
-    const isSpecialField = (f: SortField) => f.startsWith('zips') || f === 'hkbPosRank'
+    const isSpecialField = (f: SortField) => f.startsWith('zips') || f === 'hkbPosRank' || f === 'fpRank'
 
     result.sort((a, b) => {
       let aVal: string | number | null = isSpecialField(sortField) ? getSpecialField(a, sortField) : a[sortField as keyof typeof a] as string | number | null
@@ -216,6 +218,9 @@ export default function PlayersPage() {
         </div>
         <div className={`${COL_STYLES.hkbVal} px-4 text-sm text-gray-600 dark:text-gray-400 truncate`}>
           {player.hkbValue?.toLocaleString() ?? '—'}
+        </div>
+        <div className={`${COL_STYLES.fpRank} px-4 text-sm text-purple-600 dark:text-purple-400 truncate`}>
+          {player.fpRank ?? '—'}
         </div>
         <div className={`${COL_STYLES.zipsWar} px-4 text-sm text-gray-600 dark:text-gray-400 truncate`}>
           {player.zipsProjection?.war?.toFixed(1) ?? '—'}
@@ -374,6 +379,12 @@ export default function PlayersPage() {
             onClick={() => handleSort('hkbValue')}
           >
             HKB Val <SortIcon field="hkbValue" />
+          </div>
+          <div
+            className={`${COL_STYLES.fpRank} px-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600`}
+            onClick={() => handleSort('fpRank')}
+          >
+            FP Rk <SortIcon field="fpRank" />
           </div>
           <div
             className={`${COL_STYLES.zipsWar} px-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600`}

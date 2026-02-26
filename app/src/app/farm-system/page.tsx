@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import { usePlayerStore } from '@/lib/store'
 import { useHydration } from '@/lib/useHydration'
 import { ChevronUp, ChevronDown, Loader2 } from 'lucide-react'
@@ -272,9 +272,8 @@ export default function FarmSystemPage() {
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
               {farmRankings.map((ranking, i) => (
-                <>
+                <Fragment key={ranking.franchise}>
                   <tr
-                    key={ranking.franchise}
                     className="hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer"
                     onClick={() => setExpandedFranchise(
                       expandedFranchise === ranking.franchise ? null : ranking.franchise
@@ -309,7 +308,7 @@ export default function FarmSystemPage() {
                     </td>
                   </tr>
                   {expandedFranchise === ranking.franchise && (
-                    <tr key={`${ranking.franchise}-details`}>
+                    <tr>
                       <td colSpan={8} className="px-4 py-2 bg-gray-50 dark:bg-gray-900">
                         <table className="w-full">
                           <thead>
@@ -368,7 +367,7 @@ export default function FarmSystemPage() {
                       </td>
                     </tr>
                   )}
-                </>
+                </Fragment>
               ))}
             </tbody>
           </table>

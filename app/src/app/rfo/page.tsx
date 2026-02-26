@@ -8,7 +8,7 @@ import { FixedSizeList as List } from 'react-window'
 import type { Player, RfoDraftPick } from '@/types'
 
 type PlayerType = 'all' | 'batter' | 'pitcher'
-type SortField = 'hkbRank' | 'hkbValue' | 'name' | 'team' | 'position' | 'age' | 'warZ' | 'fptsZ' | 'hkbZ' | 'composite'
+type SortField = 'hkbRank' | 'fpRank' | 'hkbValue' | 'name' | 'team' | 'position' | 'age' | 'warZ' | 'fptsZ' | 'hkbZ' | 'fpZ' | 'composite'
 type SortOrder = 'asc' | 'desc'
 type StatusFilter = 'all' | 'available' | 'drafted' | 'unavailable'
 type ActiveTab = 'draft' | 'rfa' | 'results'
@@ -17,7 +17,7 @@ const ROW_HEIGHT = 40
 const HEADER_HEIGHT = 44
 
 const ASC_NATURAL: Record<string, boolean> = {
-  hkbRank: true, name: true, team: true, position: true, age: true,
+  hkbRank: true, fpRank: true, name: true, team: true, position: true, age: true,
 }
 
 // RFO Draft Level Structure (from 2026 RFO Draft sheet)
@@ -122,6 +122,7 @@ interface ZScoreEntry {
   warZ: number | null
   fptsZ: number | null
   hkbZ: number | null
+  fpZ: number | null
   composite: number | null
 }
 
@@ -355,11 +356,13 @@ export default function RfoPage() {
     const warVals: number[] = []
     const fptsVals: number[] = []
     const hkbVals: number[] = []
+    const fpVals: number[] = []
 
     available.forEach(p => {
       if (p.zipsProjection?.war != null) warVals.push(p.zipsProjection.war)
       if (p.zipsProjection?.fpts != null) fptsVals.push(p.zipsProjection.fpts)
       if (p.hkbValue != null) hkbVals.push(p.hkbValue)
+      if (p.fpRank != null) fpVals.push(p.fpRank)
     })
 
     const mean = (arr: number[]) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0
@@ -371,27 +374,31 @@ export default function RfoPage() {
     const warMean = mean(warVals)
     const fptsMean = mean(fptsVals)
     const hkbMean = mean(hkbVals)
+    const fpMean = mean(fpVals)
 
     return {
       warMean, warStd: stddev(warVals, warMean),
       fptsMean, fptsStd: stddev(fptsVals, fptsMean),
       hkbMean, hkbStd: stddev(hkbVals, hkbMean),
+      fpMean, fpStd: stddev(fpVals, fpMean),
     }
   }, [poolPlayers, draftedSet, unavailableSet])
 
   const zScoreMap = useMemo(() => {
     const map = new Map<string, ZScoreEntry>()
-    const { warMean, warStd, fptsMean, fptsStd, hkbMean, hkbStd } = zScoreStats
+    const { warMean, warStd, fptsMean, fptsStd, hkbMean, hkbStd, fpMean, fpStd } = zScoreStats
 
     poolPlayers.forEach(p => {
       const warZ = p.zipsProjection?.war != null ? (p.zipsProjection.war - warMean) / warStd : null
       const fptsZ = p.zipsProjection?.fpts != null ? (p.zipsProjection.fpts - fptsMean) / fptsStd : null
       const hkbZ = p.hkbValue != null ? (p.hkbValue - hkbMean) / hkbStd : null
+      // FP rank: inverted (lower rank = better), so (mean - rank) / std
+      const fpZ = p.fpRank != null ? (fpMean - p.fpRank) / fpStd : null
 
-      const scores = [warZ, fptsZ, hkbZ].filter((v): v is number => v !== null)
+      const scores = [warZ, fptsZ, hkbZ, fpZ].filter((v): v is number => v !== null)
       const composite = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : null
 
-      map.set(p.normalizedName, { warZ, fptsZ, hkbZ, composite })
+      map.set(p.normalizedName, { warZ, fptsZ, hkbZ, fpZ, composite })
     })
     return map
   }, [poolPlayers, zScoreStats])
@@ -437,7 +444,7 @@ export default function RfoPage() {
 
     result.sort((a, b) => {
       // Z-score sort fields
-      if (['warZ', 'fptsZ', 'hkbZ', 'composite'].includes(sortField)) {
+      if (['warZ', 'fptsZ', 'hkbZ', 'fpZ', 'composite'].includes(sortField)) {
         const aZ = zScoreMap.get(a.normalizedName)
         const bZ = zScoreMap.get(b.normalizedName)
         const aVal = aZ?.[sortField as keyof ZScoreEntry] ?? (sortOrder === 'asc' ? Infinity : -Infinity)
@@ -489,6 +496,17 @@ export default function RfoPage() {
   }
 
   const [showResetConfirm, setShowResetConfirm] = useState(false)
+  const [resultsSortCol, setResultsSortCol] = useState<string>('totalSalary')
+  const [resultsSortDir, setResultsSortDir] = useState<'asc' | 'desc'>('desc')
+
+  const handleResultsSort = (col: string) => {
+    if (resultsSortCol === col) {
+      setResultsSortDir(d => d === 'desc' ? 'asc' : 'desc')
+    } else {
+      setResultsSortCol(col)
+      setResultsSortDir('desc')
+    }
+  }
 
   const clearAllStatuses = () => {
     setRfoDraftPicks([])
@@ -561,6 +579,7 @@ export default function RfoPage() {
       contractLength: number
       hkbValue: number | null
       fpts: number | null
+      fpRank: number | null
       position: string
       team: string
       age: number | null
@@ -576,6 +595,7 @@ export default function RfoPage() {
         contractLength: s.contractLength,
         hkbValue: player?.hkbValue ?? null,
         fpts: player?.zipsProjection?.fpts ?? null,
+        fpRank: player?.fpRank ?? null,
         position: player?.position ?? '—',
         team: player?.team ?? '—',
         age: player?.age ?? null,
@@ -596,6 +616,42 @@ export default function RfoPage() {
 
     return sorted
   }, [salaries, players])
+
+  // Summary table data for results tab
+  const resultsSummary = useMemo(() => {
+    const playerMap = new Map(players.map(p => [p.normalizedName, p]))
+    return rfoResults.map(([franchise, picks]) => {
+      const fpRanks = picks.map(p => p.fpRank).filter((r): r is number => r !== null)
+      const hkbRankNums = picks.map(p => {
+        const player = playerMap.get(p.normalizedName)
+        return player?.hkbRank ?? null
+      }).filter((r): r is number => r !== null)
+      const fpOther = picks.length - fpRanks.length
+      const hkbOther = picks.length - hkbRankNums.length
+      return {
+        franchise,
+        shortCode: franchiseShortCodes.get(franchise) || franchise,
+        numPicks: picks.length,
+        totalSalary: picks.reduce((sum, p) => sum + p.salary, 0),
+        totalHkb: picks.reduce((sum, p) => sum + (p.hkbValue ?? 0), 0),
+        totalFpts: picks.reduce((sum, p) => sum + (p.fpts ?? 0), 0),
+        fpTop200: fpRanks.filter(r => r <= 200).length,
+        fpTop250: fpRanks.filter(r => r <= 250).length,
+        fpTop300: fpRanks.filter(r => r <= 300).length,
+        fpOther,
+        hkbTop200: hkbRankNums.filter(r => r <= 200).length,
+        hkbTop250: hkbRankNums.filter(r => r <= 250).length,
+        hkbTop300: hkbRankNums.filter(r => r <= 300).length,
+        hkbTop350: hkbRankNums.filter(r => r <= 350).length,
+        hkbOther,
+      }
+    }).sort((a, b) => {
+      const key = resultsSortCol as keyof typeof a
+      const aVal = (a[key] ?? (resultsSortDir === 'desc' ? -Infinity : Infinity)) as number
+      const bVal = (b[key] ?? (resultsSortDir === 'desc' ? -Infinity : Infinity)) as number
+      return resultsSortDir === 'desc' ? bVal - aVal : aVal - bVal
+    })
+  }, [rfoResults, players, franchiseShortCodes, resultsSortCol, resultsSortDir])
 
   const hasFilters = search || playerType !== 'all' || positionFilter || statusFilter !== 'available'
 
@@ -661,6 +717,10 @@ export default function RfoPage() {
         <div className={`w-[55px] min-w-[55px] px-3 text-sm ${textClass}`}>
           {p.hkbRank ?? '—'}
         </div>
+        {/* FP Rank */}
+        <div className={`w-[50px] min-w-[50px] px-2 text-sm ${textClass}`}>
+          {p.fpRank ?? '—'}
+        </div>
         {/* Name */}
         <div className={`flex-1 min-w-[150px] px-3 text-sm ${nameClass} truncate`}>
           {p.name}
@@ -705,6 +765,10 @@ export default function RfoPage() {
         {/* HKB-z */}
         <div className={`w-[55px] min-w-[55px] px-3 text-sm ${zColor(zScores?.hkbZ ?? null)}`}>
           {zScores?.hkbZ != null ? zScores.hkbZ.toFixed(2) : '—'}
+        </div>
+        {/* FP-z */}
+        <div className={`w-[50px] min-w-[50px] px-2 text-sm ${zColor(zScores?.fpZ ?? null)}`}>
+          {zScores?.fpZ != null ? zScores.fpZ.toFixed(2) : '—'}
         </div>
         {/* Composite */}
         <div className={`w-[65px] min-w-[65px] px-3 text-sm font-medium ${zColor(zScores?.composite ?? null)}`}>
@@ -1175,6 +1239,9 @@ export default function RfoPage() {
                   <div className={`w-[55px] min-w-[55px] ${thClass}`} onClick={() => handleSort('hkbRank')}>
                     HKB <SortIcon field="hkbRank" />
                   </div>
+                  <div className={`w-[50px] min-w-[50px] ${thClass}`} onClick={() => handleSort('fpRank')}>
+                    FP <SortIcon field="fpRank" />
+                  </div>
                   <div className={`flex-1 min-w-[150px] ${thClass}`} onClick={() => handleSort('name')}>
                     Name <SortIcon field="name" />
                   </div>
@@ -1207,6 +1274,9 @@ export default function RfoPage() {
                   </div>
                   <div className={`w-[55px] min-w-[55px] ${thClass}`} onClick={() => handleSort('hkbZ')}>
                     H-z <SortIcon field="hkbZ" />
+                  </div>
+                  <div className={`w-[50px] min-w-[50px] ${thClass}`} onClick={() => handleSort('fpZ')}>
+                    FP-z <SortIcon field="fpZ" />
                   </div>
                   <div className={`w-[65px] min-w-[65px] ${thClass}`} onClick={() => handleSort('composite')}>
                     Comp <SortIcon field="composite" />
@@ -1314,27 +1384,110 @@ export default function RfoPage() {
             </div>
           ) : (
             <>
-              {/* League-wide summary */}
-              <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
-                <div className="flex items-center gap-6">
-                  <div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400">Total Players Drafted</div>
-                    <div className="text-2xl font-bold text-gray-900 dark:text-white">
-                      {rfoResults.reduce((sum, [, picks]) => sum + picks.length, 0)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400">Total Salary Committed</div>
-                    <div className="text-2xl font-bold text-gray-900 dark:text-white">
-                      {formatSalary(rfoResults.reduce((sum, [, picks]) => sum + picks.reduce((s, p) => s + p.salary, 0), 0))}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400">Franchises</div>
-                    <div className="text-2xl font-bold text-gray-900 dark:text-white">
-                      {rfoResults.length}
-                    </div>
-                  </div>
+              {/* Summary comparison table */}
+              <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
+                <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Draft Summary</h2>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-gray-50 dark:bg-gray-700 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                        {[
+                          { key: 'franchise', label: 'Franchise', align: 'left' },
+                          { key: 'numPicks', label: '#', align: 'right' },
+                          { key: 'totalSalary', label: 'Salary', align: 'right' },
+                          { key: 'totalHkb', label: 'HKB', align: 'right' },
+                          { key: 'totalFpts', label: 'FPTS', align: 'right' },
+                        ].map(col => (
+                          <th
+                            key={col.key}
+                            onClick={() => col.key !== 'franchise' && handleResultsSort(col.key)}
+                            className={`px-3 py-3 whitespace-nowrap ${col.key !== 'franchise' ? 'cursor-pointer hover:text-gray-700 dark:hover:text-gray-200' : ''} select-none text-${col.align}`}
+                          >
+                            {col.label}
+                            {resultsSortCol === col.key && (resultsSortDir === 'desc' ? ' \u25BC' : ' \u25B2')}
+                          </th>
+                        ))}
+                        <th colSpan={4} className="px-3 py-1 text-center border-l border-gray-200 dark:border-gray-600">
+                          <div className="text-[10px] text-gray-400 dark:text-gray-500 font-normal normal-case tracking-normal">FantasyPros Dynasty Ranking</div>
+                          <div className="flex">
+                            {[
+                              { key: 'fpTop200', label: 'Top 200' },
+                              { key: 'fpTop250', label: 'Top 250' },
+                              { key: 'fpTop300', label: 'Top 300' },
+                              { key: 'fpOther', label: 'Other' },
+                            ].map(col => (
+                              <div
+                                key={col.key}
+                                onClick={() => handleResultsSort(col.key)}
+                                className="flex-1 text-center cursor-pointer hover:text-gray-700 dark:hover:text-gray-200 select-none"
+                              >
+                                {col.label}
+                                {resultsSortCol === col.key && (resultsSortDir === 'desc' ? ' \u25BC' : ' \u25B2')}
+                              </div>
+                            ))}
+                          </div>
+                        </th>
+                        <th colSpan={5} className="px-3 py-1 text-center border-l border-gray-200 dark:border-gray-600">
+                          <div className="text-[10px] text-gray-400 dark:text-gray-500 font-normal normal-case tracking-normal">HKB Ranking</div>
+                          <div className="flex">
+                            {[
+                              { key: 'hkbTop200', label: 'Top 200' },
+                              { key: 'hkbTop250', label: 'Top 250' },
+                              { key: 'hkbTop300', label: 'Top 300' },
+                              { key: 'hkbTop350', label: 'Top 350' },
+                              { key: 'hkbOther', label: 'Other' },
+                            ].map(col => (
+                              <div
+                                key={col.key}
+                                onClick={() => handleResultsSort(col.key)}
+                                className="flex-1 text-center cursor-pointer hover:text-gray-700 dark:hover:text-gray-200 select-none"
+                              >
+                                {col.label}
+                                {resultsSortCol === col.key && (resultsSortDir === 'desc' ? ' \u25BC' : ' \u25B2')}
+                              </div>
+                            ))}
+                          </div>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                      {resultsSummary.map(row => {
+                        const isCG = row.franchise === CG_NAME
+                        return (
+                          <tr
+                            key={row.franchise}
+                            className={`hover:bg-gray-50 dark:hover:bg-gray-700 ${
+                              isCG ? 'bg-yellow-50 dark:bg-yellow-900/20 font-medium' : ''
+                            }`}
+                          >
+                            <td className="px-3 py-2 whitespace-nowrap">
+                              <span className="font-semibold text-gray-900 dark:text-white">{row.shortCode}</span>
+                              {isCG && (
+                                <span className="ml-1 px-1 py-0.5 rounded text-[9px] font-bold bg-yellow-400 dark:bg-yellow-600 text-yellow-900 dark:text-yellow-100">
+                                  US
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-400">{row.numPicks}</td>
+                            <td className="px-3 py-2 text-right font-medium text-gray-900 dark:text-white">{formatSalary(row.totalSalary)}</td>
+                            <td className="px-3 py-2 text-right text-blue-600 dark:text-blue-400">{row.totalHkb > 0 ? row.totalHkb.toLocaleString() : '—'}</td>
+                            <td className="px-3 py-2 text-right text-green-600 dark:text-green-400">{row.totalFpts > 0 ? row.totalFpts.toFixed(0) : '—'}</td>
+                            <td className="px-3 py-2 text-center tabular-nums border-l border-gray-200 dark:border-gray-600 text-purple-600 dark:text-purple-400 font-semibold">{row.fpTop200}</td>
+                            <td className="px-3 py-2 text-center tabular-nums text-purple-600 dark:text-purple-400">{row.fpTop250}</td>
+                            <td className="px-3 py-2 text-center tabular-nums text-purple-600 dark:text-purple-400">{row.fpTop300}</td>
+                            <td className="px-3 py-2 text-center tabular-nums text-gray-400 dark:text-gray-500">{row.fpOther}</td>
+                            <td className="px-3 py-2 text-center tabular-nums border-l border-gray-200 dark:border-gray-600 text-blue-600 dark:text-blue-400 font-semibold">{row.hkbTop200}</td>
+                            <td className="px-3 py-2 text-center tabular-nums text-blue-600 dark:text-blue-400">{row.hkbTop250}</td>
+                            <td className="px-3 py-2 text-center tabular-nums text-blue-600 dark:text-blue-400">{row.hkbTop300}</td>
+                            <td className="px-3 py-2 text-center tabular-nums text-blue-600 dark:text-blue-400">{row.hkbTop350}</td>
+                            <td className="px-3 py-2 text-center tabular-nums text-gray-400 dark:text-gray-500">{row.hkbOther}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               </div>
 
@@ -1387,6 +1540,7 @@ export default function RfoPage() {
                           <th className="px-4 py-2 text-right">Yrs</th>
                           <th className="px-4 py-2 text-right">HKB Val</th>
                           <th className="px-4 py-2 text-right">FPTS</th>
+                          <th className="px-4 py-2 text-right">FP Rk</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">
@@ -1400,6 +1554,7 @@ export default function RfoPage() {
                             <td className="px-4 py-2 text-right text-gray-600 dark:text-gray-400">{p.contractLength}</td>
                             <td className="px-4 py-2 text-right text-blue-600 dark:text-blue-400">{p.hkbValue?.toLocaleString() ?? '—'}</td>
                             <td className="px-4 py-2 text-right text-green-600 dark:text-green-400">{p.fpts?.toFixed(0) ?? '—'}</td>
+                            <td className="px-4 py-2 text-right text-purple-600 dark:text-purple-400">{p.fpRank ?? '—'}</td>
                           </tr>
                         ))}
                       </tbody>
