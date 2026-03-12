@@ -16,6 +16,8 @@ import {
   Diamond,
   Sprout,
   ClipboardList,
+  Repeat,
+  Trophy,
   Moon,
   Sun
 } from 'lucide-react'
@@ -34,6 +36,8 @@ const navItems = [
   { href: '/rfo', label: 'RFO', icon: ClipboardList },
   { href: '/match', label: 'Match', icon: Link2 },
   { href: '/franchise-value', label: 'Value', icon: Diamond },
+  { href: '/standings', label: 'Standings', icon: Trophy },
+  { href: '/waiver-wire', label: 'Waivers', icon: Repeat },
   { href: '/franchises', label: 'Franchises', icon: Building2 },
 ]
 

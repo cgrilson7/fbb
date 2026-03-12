@@ -34,8 +34,11 @@ export interface Player {
   fpPos: string | null
   // Joined from ZiPS
   zipsProjection: ZipsProjection | null
+  zipsDcProjection: ZipsProjection | null
   // Derived
   isAvailable: boolean
+  isWaiver: boolean
+  waiverDay: string | null
   matchConfidence: number
   normalizedName: string
 }
@@ -157,9 +160,17 @@ export interface ZipsBatter {
   name: string
   team: string
   pa: number
+  ab: number
+  h: number
+  singles: number
+  doubles: number
+  triples: number
   hr: number
   r: number
   rbi: number
+  bb: number
+  hbp: number
+  sf: number
   sb: number
   avg: number
   obp: number
@@ -181,6 +192,9 @@ export interface ZipsPitcher {
   sv: number
   hld: number
   ip: number
+  h: number
+  bb: number
+  er: number
   k: number
   bb9: number
   whip: number
@@ -252,9 +266,17 @@ export interface ZipsProjection {
   fptsRate: number // FPTS/G for batters, FPTS/IP for pitchers
   // Batter stats
   pa?: number
+  ab?: number
+  h?: number
+  singles?: number
+  doubles?: number
+  triples?: number
   hr?: number
   r?: number
   rbi?: number
+  bb?: number
+  hbp?: number
+  sf?: number
   sb?: number
   avg?: number
   obp?: number
@@ -269,6 +291,9 @@ export interface ZipsProjection {
   hld?: number
   k?: number
   ip?: number
+  hAllowed?: number
+  bbPitching?: number
+  er?: number
   bb9?: number
   whip?: number
 }

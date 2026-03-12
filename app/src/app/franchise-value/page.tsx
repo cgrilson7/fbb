@@ -1,202 +1,71 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { usePlayerStore } from '@/lib/store'
 import { useHydration } from '@/lib/useHydration'
 import { Loader2, Trophy, Users, Hash } from 'lucide-react'
 import Diamond from './Diamond'
 import type { PositionCard, SlotCandidate } from './Diamond'
+import {
+  BASE_POSITIONS,
+  LINEUP_SLOTS,
+  SLOT_ELIGIBILITY,
+  type LineupPlayer,
+  getBasePositions,
+  getPrimaryPosition,
+  isEligibleForSlot,
+  findOptimalLineup,
+} from '@/lib/lineup'
 
 const MY_FRANCHISE = 'Colin Wilson & Greg Holmes'
-
-// Standard 8 field positions (for roster mode grouping)
-const BASE_POSITIONS = ['C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF'] as const
 
 // Roster mode: group players by primary position
 const ROSTER_DISPLAY_POSITIONS = ['C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'DH', 'SP', 'RP'] as const
 
-// Best Lineup mode: actual roster slots from constitution Section 2.4
-// C, 1B, 2B, 3B, SS, MI, CI, LF, CF, RF, OF, DH, UTIL, 10x P
-const LINEUP_SLOTS = ['C', '1B', '2B', '3B', 'SS', 'MI', 'CI', 'LF', 'CF', 'RF', 'OF', 'DH', 'UTIL', 'P'] as const
 // Slots shown on the diamond SVG (field positions only)
 const DIAMOND_LINEUP_SLOTS = ['C', '1B', '2B', '3B', 'SS', 'MI', 'CI', 'LF', 'CF', 'RF', 'OF'] as const
 
-// Which base positions make a player eligible for each lineup slot
-const SLOT_ELIGIBILITY: Record<string, string[]> = {
-  C:    ['C'],
-  '1B': ['1B'],
-  '2B': ['2B'],
-  '3B': ['3B'],
-  SS:   ['SS'],
-  MI:   ['SS', '2B'],            // middle infielder
-  CI:   ['1B', '3B'],            // corner infielder
-  LF:   ['LF'],
-  CF:   ['CF'],
-  RF:   ['RF'],
-  OF:   ['LF', 'CF', 'RF'],     // any outfielder
-  DH:   ['C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF'],  // any position player
-  UTIL: ['C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF'],  // any player (pitchers could too, but value-wise always a hitter)
-}
-
-// Map a player's position string to a primary display position (for roster mode)
-function getPrimaryPosition(posStr: string): string {
-  const positions = posStr.split(',').map(p => p.trim())
-  if (positions.includes('SP')) return 'SP'
-  if (positions.includes('RP')) return 'RP'
-  for (const fp of BASE_POSITIONS) {
-    if (positions.includes(fp)) return fp
-  }
-  if (positions.includes('MI')) return 'SS'
-  if (positions.includes('CI')) return '1B'
-  if (positions.includes('OF')) return 'LF'
-  if (positions.includes('UTIL') || positions.includes('DH')) return 'DH'
-  return 'DH'
-}
-
-// Expand a player's position string into base field positions they can play
-function getBasePositions(posStr: string): string[] {
-  const raw = posStr.split(',').map(p => p.trim())
-  const result = new Set<string>()
-  for (const p of raw) {
-    if ((BASE_POSITIONS as readonly string[]).includes(p)) result.add(p)
-    if (p === 'MI') { result.add('SS'); result.add('2B') }
-    if (p === 'CI') { result.add('1B'); result.add('3B') }
-    if (p === 'OF') { result.add('LF'); result.add('CF'); result.add('RF') }
-    if (p === 'DH' || p === 'UTIL') {
-      // DH/UTIL-only players can fill DH/UTIL slots
-      result.add('DH')
-    }
-  }
-  return Array.from(result)
-}
-
-interface LineupPlayer {
-  name: string
-  value: number
-  isFarm: boolean
-  basePositions: string[]  // base positions this player can play
-  isPitcher: boolean
-  pitcherType: 'SP' | 'RP' | null
-}
-
-// Check if a player is eligible for a lineup slot
-function isEligibleForSlot(player: LineupPlayer, slot: string): boolean {
-  const eligible = SLOT_ELIGIBILITY[slot]
-  if (!eligible) return false
-  // DH and UTIL: any non-pitcher with at least one base position
-  if (slot === 'DH' || slot === 'UTIL') {
-    return !player.isPitcher && player.basePositions.length > 0
-  }
-  return player.basePositions.some(bp => eligible.includes(bp))
-}
-
-// Try to find an augmenting path to place playerIdx into some slot.
-// Returns true if the player was successfully placed.
-function augment(
-  playerIdx: number,
-  players: LineupPlayer[],
-  slots: readonly string[],
-  slotMatch: Record<string, number>,
-  visited: Set<string>
-): boolean {
-  const player = players[playerIdx]
-  for (const slot of slots) {
-    if (visited.has(slot)) continue
-    if (!isEligibleForSlot(player, slot)) continue
-    visited.add(slot)
-    // If slot is empty or the current occupant can be moved elsewhere
-    if (slotMatch[slot] < 0 || augment(slotMatch[slot], players, slots, slotMatch, visited)) {
-      slotMatch[slot] = playerIdx
-      return true
-    }
-  }
-  return false
-}
-
-// Maximum weight bipartite matching via augmenting paths (Kuhn's algorithm).
-// Players are processed in decreasing value order. Since player values are
-// independent of which slot they fill, this produces an optimal assignment
-// that maximizes total value across all 13 position-player slots per Section 2.4.
-function findOptimalLineup(
-  allPlayers: LineupPlayer[],
-  locks: Record<string, string> = {}
-): Record<string, LineupPlayer | null> {
-  // Exclude farm/minors players — they can't be auto-assigned (but locked farm players are kept)
-  const lockedNames = new Set(Object.values(locks))
-  const posPlayers = allPlayers
-    .filter(p => !p.isPitcher && (!p.isFarm || lockedNames.has(p.name)))
-    .sort((a, b) => b.value - a.value)
-  const pitchers = allPlayers.filter(p => p.isPitcher && !p.isFarm).sort((a, b) => b.value - a.value)
-
-  const POS_SLOTS = ['C', '1B', '2B', '3B', 'SS', 'MI', 'CI', 'LF', 'CF', 'RF', 'OF', 'DH', 'UTIL'] as const
-
-  // slotMatch[slot] = index into posPlayers of the assigned player, or -1
-  const slotMatch: Record<string, number> = {}
-  for (const slot of POS_SLOTS) slotMatch[slot] = -1
-
-  // Pre-assign locked players before running the algorithm
-  const lockedPlayerIndices = new Set<number>()
-  for (const [slot, playerName] of Object.entries(locks)) {
-    if (slot === 'P') continue // pitcher locks not supported
-    const idx = posPlayers.findIndex(p => p.name === playerName)
-    if (idx >= 0) {
-      slotMatch[slot] = idx
-      lockedPlayerIndices.add(idx)
-    }
-  }
-
-  // Process each non-locked player in decreasing value order
-  for (let pi = 0; pi < posPlayers.length; pi++) {
-    if (lockedPlayerIndices.has(pi)) continue
-    // Skip slots already locked
-    const availableSlots = POS_SLOTS.filter(s => !(s in locks))
-    const visited = new Set<string>()
-    // Add locked slots to visited so they won't be bumped
-    for (const s of POS_SLOTS) {
-      if (s in locks) visited.add(s)
-    }
-    augment(pi, posPlayers, availableSlots, slotMatch, visited)
-  }
-
-  // Build result
-  const result: Record<string, LineupPlayer | null> = {}
-  for (const slot of POS_SLOTS) {
-    result[slot] = slotMatch[slot] >= 0 ? posPlayers[slotMatch[slot]] : null
-  }
-
-  // Pitchers: best 10 by value
-  const topPitchers = pitchers.slice(0, 10)
-  const pitcherValue = topPitchers.reduce((sum, p) => sum + p.value, 0)
-  result['P'] = topPitchers.length > 0
-    ? { name: `${topPitchers.length} pitchers`, value: pitcherValue, isFarm: false, basePositions: [], isPitcher: true, pitcherType: null }
-    : null
-
-  return result
-}
-
 type ValueMetric = 'hkb' | 'fpts' | 'fpRank'
+type ZipsSource = 'zips' | 'zipsDc'
 
 export default function FranchiseValuePage() {
-  const { players, franchiseMappings } = usePlayerStore()
+  const { players, franchiseMappings, lockedSlots, lockedSlotsFranchise, lockedSlotsMetric, setLockedSlots, clearLockedSlots, setLockedSlotsMeta } = usePlayerStore()
   const hasHydrated = useHydration()
   const [selectedFranchise, setSelectedFranchise] = useState(MY_FRANCHISE)
-  const [viewMode, setViewMode] = useState<'roster' | 'bestLineup' | 'depthChart'>('roster')
+  const [viewMode, setViewMode] = useState<'roster' | 'bestLineup' | 'depthChart' | 'distributions'>('roster')
   const [valueMetric, setValueMetric] = useState<ValueMetric>('hkb')
+  const [zipsSource, setZipsSource] = useState<ZipsSource>('zips')
   const [sortCol, setSortCol] = useState<string>('total')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
-  const [lockedSlots, setLockedSlots] = useState<Record<string, string>>({})
+
+  // Sync locked slots metadata when franchise or metric changes
+  useEffect(() => {
+    if (viewMode === 'bestLineup') {
+      // Clear locks if franchise or metric changed from what was stored
+      if (lockedSlotsFranchise && lockedSlotsFranchise !== selectedFranchise) {
+        clearLockedSlots()
+      }
+      const currentMetricKey = valueMetric === 'fpts' ? `fpts:${zipsSource}` : valueMetric
+      if (lockedSlotsMetric && lockedSlotsMetric !== currentMetricKey) {
+        clearLockedSlots()
+      }
+      setLockedSlotsMeta(selectedFranchise, currentMetricKey)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedFranchise, valueMetric, zipsSource, viewMode])
 
   // Clear locks when switching franchise or view mode
   const handleFranchiseChange = (f: string) => {
     setSelectedFranchise(f)
-    setLockedSlots({})
+    clearLockedSlots()
   }
-  const handleViewModeChange = (mode: 'roster' | 'bestLineup' | 'depthChart') => {
+  const handleViewModeChange = (mode: 'roster' | 'bestLineup' | 'depthChart' | 'distributions') => {
     setViewMode(mode)
-    setLockedSlots({})
+    clearLockedSlots()
   }
 
-  const metricLabel = valueMetric === 'hkb' ? 'HKB Value' : valueMetric === 'fpts' ? 'ZiPS FPTS' : 'FP Rank Value'
+  const zipsLabel = zipsSource === 'zipsDc' ? 'ZiPS DC' : 'ZiPS'
+  const metricLabel = valueMetric === 'hkb' ? 'HKB Value' : valueMetric === 'fpts' ? `${zipsLabel} FPTS` : 'FP Rank Value'
 
   const franchises = useMemo(() => {
     return franchiseMappings
@@ -207,7 +76,10 @@ export default function FranchiseValuePage() {
 
   // Extract value from a player based on selected metric
   function getPlayerValue(p: typeof players[number]): number | null {
-    if (valueMetric === 'fpts') return p.zipsProjection?.fpts ?? null
+    if (valueMetric === 'fpts') {
+      const proj = zipsSource === 'zipsDc' ? p.zipsDcProjection : p.zipsProjection
+      return proj?.fpts ?? null
+    }
     if (valueMetric === 'fpRank') return p.fpRank != null ? 301 - p.fpRank : null
     return p.hkbValue
   }
@@ -234,7 +106,7 @@ export default function FranchiseValuePage() {
     })
     return map
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [players, franchises, valueMetric])
+  }, [players, franchises, valueMetric, zipsSource])
 
   // Build per-franchise, per-position value aggregation (roster mode)
   const franchiseData = useMemo(() => {
@@ -270,7 +142,7 @@ export default function FranchiseValuePage() {
 
     return data
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [players, franchises, valueMetric])
+  }, [players, franchises, valueMetric, zipsSource])
 
   // Compute optimal lineups for all franchises (best lineup mode)
   // Selected franchise uses lockedSlots; others use no locks
@@ -302,6 +174,76 @@ export default function FranchiseValuePage() {
     })
     return result
   }, [viewMode, franchises, franchisePlayersByTeam])
+
+  // Distribution data: all franchises as rows, bucketed by metric, sorted by avg
+  const distributionData = useMemo(() => {
+    if (viewMode !== 'distributions') return null
+
+    const RANK_BUCKETS = [
+      { label: '1-15', min: 1, max: 15 },
+      { label: '16-50', min: 16, max: 50 },
+      { label: '51-100', min: 51, max: 100 },
+      { label: '101-150', min: 101, max: 150 },
+      { label: '151-200', min: 151, max: 200 },
+      { label: '201-300', min: 201, max: 300 },
+      { label: '301-400', min: 301, max: 400 },
+      { label: '400+', min: 401, max: Infinity },
+    ]
+
+    // HKB uses rank buckets (same as ECR/ADP)
+
+    type FranchiseRow = { franchise: string; counts: number[]; avg: number; total: number; isSelected: boolean }
+    type TableData = { title: string; subtitle: string; bucketLabels: string[]; rows: FranchiseRow[]; lowerIsBetter: boolean }
+
+    function buildRankTable(
+      title: string,
+      subtitle: string,
+      getValue: (p: typeof players[number]) => number | null,
+      lowerIsBetter: boolean
+    ): TableData {
+      const buckets = RANK_BUCKETS
+      const byFranchise: Record<string, { counts: number[]; values: number[] }> = {}
+      franchises.forEach(f => { byFranchise[f] = { counts: buckets.map(() => 0), values: [] } })
+
+      // Deduplicate by name within franchise (e.g. Ohtani as batter + pitcher) — keep best rank
+      const bestByName: Record<string, Record<string, number>> = {} // franchise -> name -> best value
+      players.forEach(p => {
+        if (!p.franchise || !byFranchise[p.franchise]) return
+        const v = getValue(p)
+        if (v == null) return
+        if (!bestByName[p.franchise]) bestByName[p.franchise] = {}
+        const prev = bestByName[p.franchise][p.name]
+        if (prev == null || (lowerIsBetter ? v < prev : v > prev)) {
+          bestByName[p.franchise][p.name] = v
+        }
+      })
+
+      Object.entries(bestByName).forEach(([f, names]) => {
+        Object.values(names).forEach(v => {
+          const idx = buckets.findIndex(b => v >= b.min && v <= b.max)
+          if (idx === -1) return
+          byFranchise[f].counts[idx]++
+          byFranchise[f].values.push(v)
+        })
+      })
+
+      const rows: FranchiseRow[] = franchises.map(f => {
+        const d = byFranchise[f]
+        const avg = d.values.length > 0 ? d.values.reduce((a, b) => a + b, 0) / d.values.length : lowerIsBetter ? Infinity : -Infinity
+        return { franchise: f, counts: d.counts, avg, total: d.values.length, isSelected: f === selectedFranchise }
+      })
+
+      rows.sort((a, b) => lowerIsBetter ? a.avg - b.avg : b.avg - a.avg)
+
+      return { title, subtitle, bucketLabels: buckets.map(b => b.label), rows, lowerIsBetter }
+    }
+
+    return [
+      buildRankTable('FantasyPros Dynasty ECR', 'Sorted by avg ECR (lower = better)', p => p.fpRank, true),
+      buildRankTable('Fantrax ADP', 'Sorted by avg ADP (lower = better)', p => p.adp, true),
+      buildRankTable('HKB Dynasty Rank', 'Sorted by avg HKB rank (lower = better)', p => p.hkbRank, true),
+    ]
+  }, [viewMode, players, franchises, selectedFranchise])
 
   // Pitcher sidebar data for selected franchise
   const pitcherData = useMemo(() => {
@@ -478,31 +420,27 @@ export default function FranchiseValuePage() {
 
   // Lock/unlock handler for diamond slots
   const handleToggleLock = (slot: string) => {
-    setLockedSlots(prev => {
-      const next = { ...prev }
-      if (slot in next) {
-        delete next[slot]
-      } else {
-        const player = optimalLineups[selectedFranchise]?.[slot]
-        if (player && player.name) {
-          next[slot] = player.name
-        }
+    const next = { ...lockedSlots }
+    if (slot in next) {
+      delete next[slot]
+    } else {
+      const player = optimalLineups[selectedFranchise]?.[slot]
+      if (player && player.name) {
+        next[slot] = player.name
       }
-      return next
-    })
+    }
+    setLockedSlots(next)
   }
 
   // Assign a player to a slot (locks them there)
   const handleAssignToSlot = (playerName: string, slot: string) => {
-    setLockedSlots(prev => {
-      const next = { ...prev }
-      // Remove player from any other locked slot
-      for (const [s, name] of Object.entries(next)) {
-        if (name === playerName) delete next[s]
-      }
-      next[slot] = playerName
-      return next
-    })
+    const next = { ...lockedSlots }
+    // Remove player from any other locked slot
+    for (const [s, name] of Object.entries(next)) {
+      if (name === playerName) delete next[s]
+    }
+    next[slot] = playerName
+    setLockedSlots(next)
   }
 
   // Bench & farm data for selected franchise (bestLineup mode)
@@ -686,6 +624,16 @@ export default function FranchiseValuePage() {
             >
               Depth Chart
             </button>
+            <button
+              onClick={() => handleViewModeChange('distributions')}
+              className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                viewMode === 'distributions'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'
+              }`}
+            >
+              Distributions
+            </button>
           </div>
           <div className="inline-flex rounded-lg border border-gray-300 dark:border-gray-600 overflow-hidden">
             <button
@@ -706,7 +654,7 @@ export default function FranchiseValuePage() {
                   : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'
               }`}
             >
-              ZiPS FPTS
+              {zipsLabel} FPTS
             </button>
             <button
               onClick={() => setValueMetric('fpRank')}
@@ -719,6 +667,23 @@ export default function FranchiseValuePage() {
               FP Rank
             </button>
           </div>
+          {valueMetric === 'fpts' && (
+            <div className="inline-flex rounded-lg border border-gray-300 dark:border-gray-600 overflow-hidden">
+              {(['zips', 'zipsDc'] as const).map(s => (
+                <button
+                  key={s}
+                  onClick={() => setZipsSource(s)}
+                  className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                    zipsSource === s
+                      ? 'bg-teal-600 text-white'
+                      : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'
+                  }`}
+                >
+                  {s === 'zips' ? 'ZiPS' : 'ZiPS DC'}
+                </button>
+              ))}
+            </div>
+          )}
           <select
             value={selectedFranchise}
             onChange={(e) => handleFranchiseChange(e.target.value)}
@@ -789,8 +754,66 @@ export default function FranchiseValuePage() {
         </div>
       </div>
 
+      {/* Distributions View */}
+      {viewMode === 'distributions' && distributionData && (
+        <div className="space-y-6">
+          {distributionData.map((table, ti) => (
+            <div key={ti} className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
+              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-0.5">{table.title}</h3>
+              <p className="text-xs text-gray-400 dark:text-gray-500 mb-3">{table.subtitle}</p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-gray-200 dark:border-gray-700">
+                      <th className="text-left py-1.5 px-2 text-gray-500 dark:text-gray-400 font-medium sticky left-0 bg-white dark:bg-gray-800">#</th>
+                      <th className="text-left py-1.5 px-2 text-gray-500 dark:text-gray-400 font-medium sticky left-6 bg-white dark:bg-gray-800">Franchise</th>
+                      {table.bucketLabels.map((label, i) => (
+                        <th key={i} className="text-center py-1.5 px-2 text-gray-500 dark:text-gray-400 font-medium whitespace-nowrap">{label}</th>
+                      ))}
+                      <th className="text-center py-1.5 px-2 text-gray-500 dark:text-gray-400 font-medium">N</th>
+                      <th className="text-center py-1.5 px-2 text-gray-500 dark:text-gray-400 font-medium">Avg</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {table.rows.map((row, ri) => {
+                      // Find max count per column across all franchises for heat-map
+                      const colMaxes = table.bucketLabels.map((_, ci) => Math.max(...table.rows.map(r => r.counts[ci])))
+                      return (
+                        <tr key={ri} className={`border-b border-gray-100 dark:border-gray-700/50 ${row.isSelected ? 'font-semibold' : ''}`}>
+                          <td className={`py-1.5 px-2 sticky left-0 ${row.isSelected ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' : 'text-gray-400 dark:text-gray-500 bg-white dark:bg-gray-800'}`}>{ri + 1}</td>
+                          <td className={`py-1.5 px-2 sticky left-6 whitespace-nowrap ${row.isSelected ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' : 'text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800'}`}>
+                            {row.franchise.length > 24 ? row.franchise.slice(0, 22) + '...' : row.franchise}
+                          </td>
+                          {row.counts.map((count, ci) => {
+                            const max = colMaxes[ci]
+                            const intensity = max > 0 ? count / max : 0
+                            // For rank-based (lower is better): more players in low buckets = green
+                            // For HKB (higher is better): more players in high buckets = green
+                            // Use a simple green intensity based on count relative to column max
+                            const bgStyle = count > 0 ? { backgroundColor: `rgba(34, 197, 94, ${intensity * 0.3})` } : undefined
+                            return (
+                              <td key={ci} className={`text-center py-1.5 px-1.5 tabular-nums ${count > 0 ? 'text-gray-800 dark:text-gray-200' : 'text-gray-300 dark:text-gray-600'}`} style={bgStyle}>
+                                {count || '-'}
+                              </td>
+                            )
+                          })}
+                          <td className="text-center py-1.5 px-2 text-gray-500 dark:text-gray-400 tabular-nums">{row.total}</td>
+                          <td className="text-center py-1.5 px-2 tabular-nums font-medium text-gray-700 dark:text-gray-300">
+                            {row.avg === Infinity || row.avg === -Infinity ? '-' : row.avg.toFixed(1)}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Diamond + Pitcher Sidebar */}
-      <div className="grid grid-cols-[200px_1fr] gap-4">
+      {viewMode !== 'distributions' && <div className="grid grid-cols-[200px_1fr] gap-4">
         {/* Pitchers Sidebar */}
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
           <div className="flex items-center justify-between mb-3">
@@ -1024,7 +1047,7 @@ export default function FranchiseValuePage() {
                     {Object.keys(lockedSlots).length} slot{Object.keys(lockedSlots).length > 1 ? 's' : ''} locked
                   </span>
                   <button
-                    onClick={() => setLockedSlots({})}
+                    onClick={() => clearLockedSlots()}
                     className="text-xs text-red-500 hover:text-red-700 dark:hover:text-red-400"
                   >
                     Clear all locks
@@ -1034,10 +1057,10 @@ export default function FranchiseValuePage() {
             </div>
           )}
         </div>
-      </div>
+      </div>}
 
       {/* League Comparison Table */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
+      {viewMode !== 'distributions' && <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
         <div className="p-4 border-b border-gray-200 dark:border-gray-700">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
             League Comparison {viewMode === 'bestLineup' ? '(Best Lineup)' : viewMode === 'depthChart' ? '(Depth Chart)' : ''}
@@ -1100,7 +1123,7 @@ export default function FranchiseValuePage() {
             </tbody>
           </table>
         </div>
-      </div>
+      </div>}
     </div>
   )
 }

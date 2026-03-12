@@ -35,6 +35,8 @@ const storeKeyMap: Record<FileType, string> = {
   pitchingProspects: 'pitchingProspects',
   zipsBatters: 'zipsBatters',
   zipsPitchers: 'zipsPitchers',
+  zipsDcBatters: 'zipsDcBatters',
+  zipsDcPitchers: 'zipsDcPitchers',
   freeAgency: 'freeAgentEntries',
   fvRankings: 'fvRankings',
   fpRankings: 'fpRankings',
@@ -49,13 +51,15 @@ export default function UploadPage() {
     pitchingProspects: { type: 'pitchingProspects', status: 'pending' },
     zipsBatters: { type: 'zipsBatters', status: 'pending' },
     zipsPitchers: { type: 'zipsPitchers', status: 'pending' },
+    zipsDcBatters: { type: 'zipsDcBatters', status: 'pending' },
+    zipsDcPitchers: { type: 'zipsDcPitchers', status: 'pending' },
     freeAgency: { type: 'freeAgency', status: 'pending' },
     fvRankings: { type: 'fvRankings', status: 'pending' },
     fpRankings: { type: 'fpRankings', status: 'pending' },
   })
 
   const store = usePlayerStore()
-  const { setPlayers, setHKB, setSalaries, setBattingProspects, setPitchingProspects, setZipsBatters, setZipsPitchers, setFreeAgentEntries, setFVRankings, setFPRankings, joinData } = store
+  const { setPlayers, setHKB, setSalaries, setBattingProspects, setPitchingProspects, setZipsBatters, setZipsPitchers, setZipsDcBatters, setZipsDcPitchers, setFreeAgentEntries, setFVRankings, setFPRankings, joinData } = store
   const hasHydrated = useHydration()
 
   const [isJoining, setIsJoining] = useState(false)
@@ -137,6 +141,12 @@ export default function UploadPage() {
             break
           case 'zipsPitchers':
             setZipsPitchers(data)
+            break
+          case 'zipsDcBatters':
+            setZipsDcBatters(data)
+            break
+          case 'zipsDcPitchers':
+            setZipsDcPitchers(data)
             break
           case 'freeAgency':
             setFreeAgentEntries(data)

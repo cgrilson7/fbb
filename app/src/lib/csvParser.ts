@@ -13,7 +13,7 @@ import type {
   FantasyProsRanking
 } from '@/types'
 
-export type FileType = 'players' | 'hkb' | 'salaries' | 'battingProspects' | 'pitchingProspects' | 'zipsBatters' | 'zipsPitchers' | 'freeAgency' | 'fvRankings' | 'fpRankings'
+export type FileType = 'players' | 'hkb' | 'salaries' | 'battingProspects' | 'pitchingProspects' | 'zipsBatters' | 'zipsPitchers' | 'zipsDcBatters' | 'zipsDcPitchers' | 'freeAgency' | 'fvRankings' | 'fpRankings'
 
 export function detectFileType(filename: string): FileType | null {
   const lower = filename.toLowerCase()
@@ -25,7 +25,9 @@ export function detectFileType(filename: string): FileType | null {
   if (lower.includes('free') && lower.includes('agen')) return 'freeAgency'
   if (lower.includes('batting') && lower.includes('prospect')) return 'battingProspects'
   if (lower.includes('pitching') && lower.includes('prospect')) return 'pitchingProspects'
-  // ZiPS projections
+  // ZiPS projections (check DC before regular)
+  if (lower.includes('zips') && lower.includes('dc') && lower.includes('batter')) return 'zipsDcBatters'
+  if (lower.includes('zips') && lower.includes('dc') && lower.includes('pitcher')) return 'zipsDcPitchers'
   if (lower.includes('zips') && lower.includes('batter')) return 'zipsBatters'
   if (lower.includes('zips') && lower.includes('pitcher')) return 'zipsPitchers'
   // Check "all" last since it's a common substring
@@ -75,8 +77,10 @@ function transformData(rows: Record<string, string>[], type: FileType): unknown[
     case 'pitchingProspects':
       return rows.map(transformPitchingProspect)
     case 'zipsBatters':
+    case 'zipsDcBatters':
       return rows.map(transformZipsBatter)
     case 'zipsPitchers':
+    case 'zipsDcPitchers':
       return rows.map(transformZipsPitcher)
     case 'freeAgency':
       return rows.map(transformFreeAgency)
@@ -92,6 +96,8 @@ function transformData(rows: Record<string, string>[], type: FileType): unknown[
 function transformPlayer(row: Record<string, string>): Player {
   const name = row['Player'] || row['Name'] || ''
   const status = row['Status'] || 'FA'
+  const isWaiver = status.startsWith('W')
+  const waiverDayMatch = isWaiver ? status.match(/\((\w+)\)/) : null
   return {
     id: row['ID'] || crypto.randomUUID(),
     name,
@@ -123,8 +129,11 @@ function transformPlayer(row: Record<string, string>): Player {
     fvHighestLevel: null,
     fvPosition: null,
     zipsProjection: null,
+    zipsDcProjection: null,
     // Derived
-    isAvailable: status === 'FA',
+    isAvailable: status === 'FA' || isWaiver,
+    isWaiver,
+    waiverDay: waiverDayMatch?.[1] ?? null,
     matchConfidence: 1,
     normalizedName: normalize(name)
   }
@@ -249,9 +258,17 @@ function transformZipsBatter(row: Record<string, string>): ZipsBatter {
     name,
     team: row['Team'] || '',
     pa: parseInt(row['PA'] || '0', 10),
+    ab: parseInt(row['AB'] || '0', 10),
+    h: parseInt(row['H'] || '0', 10),
+    singles: parseInt(row['1B'] || '0', 10),
+    doubles: parseInt(row['2B'] || '0', 10),
+    triples: parseInt(row['3B'] || '0', 10),
     hr: parseInt(row['HR'] || '0', 10),
     r: parseInt(row['R'] || '0', 10),
     rbi: parseInt(row['RBI'] || '0', 10),
+    bb: parseInt(row['BB'] || '0', 10),
+    hbp: parseInt(row['HBP'] || '0', 10),
+    sf: parseInt(row['SF'] || '0', 10),
     sb: parseInt(row['SB'] || '0', 10),
     avg: parseFloat(row['AVG'] || '0'),
     obp: parseFloat(row['OBP'] || '0'),
@@ -276,6 +293,9 @@ function transformZipsPitcher(row: Record<string, string>): ZipsPitcher {
     sv: parseInt(row['SV'] || '0', 10),
     hld: parseInt(row['HLD'] || '0', 10),
     ip: parseFloat(row['IP'] || '0'),
+    h: parseInt(row['H'] || '0', 10),
+    bb: parseInt(row['BB'] || '0', 10),
+    er: parseInt(row['ER'] || '0', 10),
     k: parseInt(row['SO'] || '0', 10),
     bb9: parseFloat(row['BB/9'] || '0'),
     whip: parseFloat(row['WHIP'] || '0'),
@@ -376,6 +396,8 @@ const DEFAULT_DATA_MANIFEST: { url: string; type: FileType }[] = [
   { url: '/data/pitching_prospects.csv', type: 'pitchingProspects' },
   { url: '/data/zips_batters.csv', type: 'zipsBatters' },
   { url: '/data/zips_pitchers.csv', type: 'zipsPitchers' },
+  { url: '/data/zips_dc_batters.csv', type: 'zipsDcBatters' },
+  { url: '/data/zips_dc_pitchers.csv', type: 'zipsDcPitchers' },
   { url: '/data/free_agency.csv', type: 'freeAgency' },
   { url: '/data/fv_rankings.csv', type: 'fvRankings' },
   { url: '/data/fantasypros_dynasty_rankings.csv', type: 'fpRankings' },
@@ -397,6 +419,8 @@ export async function fetchAndLoadDefaults(
     pitchingProspects: 'pitchingProspects',
     zipsBatters: 'zipsBatters',
     zipsPitchers: 'zipsPitchers',
+    zipsDcBatters: 'zipsDcBatters',
+    zipsDcPitchers: 'zipsDcPitchers',
     freeAgency: 'freeAgentEntries',
     fvRankings: 'fvRankings',
     fpRankings: 'fpRankings',
@@ -410,6 +434,8 @@ export async function fetchAndLoadDefaults(
     pitchingProspects: 'setPitchingProspects',
     zipsBatters: 'setZipsBatters',
     zipsPitchers: 'setZipsPitchers',
+    zipsDcBatters: 'setZipsDcBatters',
+    zipsDcPitchers: 'setZipsDcPitchers',
     freeAgency: 'setFreeAgentEntries',
     fvRankings: 'setFVRankings',
     fpRankings: 'setFPRankings',

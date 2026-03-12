@@ -52,6 +52,8 @@ interface PlayerStore {
   pitchingProspects: PitchingProspect[]
   zipsBatters: ZipsBatter[]
   zipsPitchers: ZipsPitcher[]
+  zipsDcBatters: ZipsBatter[]
+  zipsDcPitchers: ZipsPitcher[]
   freeAgentEntries: FreeAgentEntry[]
   fvRankings: FVRanking[]
   fpRankings: FantasyProsRanking[]
@@ -94,6 +96,8 @@ interface PlayerStore {
   setPitchingProspects: (prospects: PitchingProspect[]) => void
   setZipsBatters: (batters: ZipsBatter[]) => void
   setZipsPitchers: (pitchers: ZipsPitcher[]) => void
+  setZipsDcBatters: (batters: ZipsBatter[]) => void
+  setZipsDcPitchers: (pitchers: ZipsPitcher[]) => void
   setFreeAgentEntries: (entries: FreeAgentEntry[]) => void
   setFVRankings: (rankings: FVRanking[]) => void
   setFPRankings: (rankings: FantasyProsRanking[]) => void
@@ -109,6 +113,14 @@ interface PlayerStore {
   setFranchiseMapping: (mapping: FranchiseMapping) => void
   addNameMapping: (mapping: NameMapping) => void
   clearUnmatched: (name: string) => void
+
+  // Locked lineup slots (shared between Value page and Waiver Wire)
+  lockedSlots: Record<string, string>
+  lockedSlotsFranchise: string
+  lockedSlotsMetric: string
+  setLockedSlots: (slots: Record<string, string>) => void
+  clearLockedSlots: () => void
+  setLockedSlotsMeta: (franchise: string, metric: string) => void
 
   // Filters
   getPlayersByFranchise: (franchise: string) => Player[]
@@ -128,6 +140,8 @@ export const usePlayerStore = create<PlayerStore>()(
       pitchingProspects: [],
       zipsBatters: [],
       zipsPitchers: [],
+      zipsDcBatters: [],
+      zipsDcPitchers: [],
       freeAgentEntries: [],
       fvRankings: [],
       fpRankings: [],
@@ -138,6 +152,9 @@ export const usePlayerStore = create<PlayerStore>()(
       rfoDraftPicks: [],
       rfoUnavailable: [],
       rfoDraftCursor: { level: 1, round: 1, pickIndex: 0 },
+      lockedSlots: {},
+      lockedSlotsFranchise: '',
+      lockedSlotsMetric: '',
       franchiseMappings: DEFAULT_FRANCHISE_MAPPINGS,
       nameMappings: [],
       unmatchedPlayers: [],
@@ -150,6 +167,8 @@ export const usePlayerStore = create<PlayerStore>()(
       setPitchingProspects: (prospects) => set({ pitchingProspects: prospects }),
       setZipsBatters: (batters) => set({ zipsBatters: batters }),
       setZipsPitchers: (pitchers) => set({ zipsPitchers: pitchers }),
+      setZipsDcBatters: (batters) => set({ zipsDcBatters: batters }),
+      setZipsDcPitchers: (pitchers) => set({ zipsDcPitchers: pitchers }),
       setFreeAgentEntries: (entries) => set({ freeAgentEntries: entries }),
       setFVRankings: (rankings) => set({ fvRankings: rankings }),
       setFPRankings: (rankings) => set({ fpRankings: rankings }),
@@ -157,7 +176,7 @@ export const usePlayerStore = create<PlayerStore>()(
       // Join data from all sources
       joinData: () => {
         const state = get()
-        const { rawPlayers, hkbPlayers, salaries, battingProspects, pitchingProspects, zipsBatters, zipsPitchers, fvRankings, fpRankings, nameMappings, franchiseMappings } = state
+        const { rawPlayers, hkbPlayers, salaries, battingProspects, pitchingProspects, zipsBatters, zipsPitchers, zipsDcBatters, zipsDcPitchers, fvRankings, fpRankings, nameMappings, franchiseMappings } = state
 
         // Create lookup maps
         const hkbMap = new Map<string, HKBPlayer>()
@@ -177,6 +196,12 @@ export const usePlayerStore = create<PlayerStore>()(
 
         const zipsPitcherMap = new Map<string, ZipsPitcher>()
         zipsPitchers.forEach(p => zipsPitcherMap.set(p.normalizedName, p))
+
+        const zipsDcBatterMap = new Map<string, ZipsBatter>()
+        zipsDcBatters.forEach(p => zipsDcBatterMap.set(p.normalizedName, p))
+
+        const zipsDcPitcherMap = new Map<string, ZipsPitcher>()
+        zipsDcPitchers.forEach(p => zipsDcPitcherMap.set(p.normalizedName, p))
 
         const fvRankingMap = new Map<string, FVRanking>()
         fvRankings.forEach(p => fvRankingMap.set(p.normalizedName, p))
@@ -253,44 +278,32 @@ export const usePlayerStore = create<PlayerStore>()(
             }),
           } : null
 
-          // ZiPS projection data
-          const zipsBatter = zipsBatterMap.get(normalizedName)
-          const zipsPitcher = zipsPitcherMap.get(normalizedName)
-          let zipsProjection: ZipsProjection | null = null
-          if (zipsBatter) {
-            zipsProjection = {
-              type: 'batter',
-              war: zipsBatter.war,
-              fpts: zipsBatter.fpts,
-              fptsRate: zipsBatter.fptsPerG,
-              pa: zipsBatter.pa,
-              hr: zipsBatter.hr,
-              r: zipsBatter.r,
-              rbi: zipsBatter.rbi,
-              sb: zipsBatter.sb,
-              avg: zipsBatter.avg,
-              obp: zipsBatter.obp,
-              slg: zipsBatter.slg,
-              ops: zipsBatter.ops,
-              wrcPlus: zipsBatter.wrcPlus,
+          // Build ZipsProjection from batter/pitcher data
+          const buildProjection = (bMap: Map<string, ZipsBatter>, pMap: Map<string, ZipsPitcher>): ZipsProjection | null => {
+            const b = bMap.get(normalizedName)
+            const p = pMap.get(normalizedName)
+            if (b) {
+              return {
+                type: 'batter',
+                war: b.war, fpts: b.fpts, fptsRate: b.fptsPerG,
+                pa: b.pa, ab: b.ab, h: b.h, singles: b.singles, doubles: b.doubles, triples: b.triples,
+                hr: b.hr, r: b.r, rbi: b.rbi, bb: b.bb, hbp: b.hbp, sf: b.sf,
+                sb: b.sb, avg: b.avg, obp: b.obp, slg: b.slg, ops: b.ops, wrcPlus: b.wrcPlus,
+              }
+            } else if (p) {
+              return {
+                type: 'pitcher',
+                war: p.war, fpts: p.fpts, fptsRate: p.fptsPerIP,
+                w: p.w, qs: p.qs, era: p.era, sv: p.sv, hld: p.hld,
+                k: p.k, ip: p.ip, hAllowed: p.h, bbPitching: p.bb, er: p.er,
+                bb9: p.bb9, whip: p.whip,
+              }
             }
-          } else if (zipsPitcher) {
-            zipsProjection = {
-              type: 'pitcher',
-              war: zipsPitcher.war,
-              fpts: zipsPitcher.fpts,
-              fptsRate: zipsPitcher.fptsPerIP,
-              w: zipsPitcher.w,
-              qs: zipsPitcher.qs,
-              era: zipsPitcher.era,
-              sv: zipsPitcher.sv,
-              hld: zipsPitcher.hld,
-              k: zipsPitcher.k,
-              ip: zipsPitcher.ip,
-              bb9: zipsPitcher.bb9,
-              whip: zipsPitcher.whip,
-            }
+            return null
           }
+
+          const zipsProjection = buildProjection(zipsBatterMap, zipsPitcherMap)
+          const zipsDcProjection = buildProjection(zipsDcBatterMap, zipsDcPitcherMap)
 
           // FantasyPros ranking data
           const fpRanking = fpRankingMap.get(normalizedName)
@@ -335,6 +348,7 @@ export const usePlayerStore = create<PlayerStore>()(
             fvHighestLevel,
             fvPosition,
             zipsProjection,
+            zipsDcProjection,
             matchConfidence: hkb ? 1 : 0.5,
           }
         })
@@ -423,6 +437,11 @@ export const usePlayerStore = create<PlayerStore>()(
           unmatchedPlayers: state.unmatchedPlayers.filter(u => u.name !== name)
         })),
 
+      // Locked slots management
+      setLockedSlots: (slots) => set({ lockedSlots: slots }),
+      clearLockedSlots: () => set({ lockedSlots: {} }),
+      setLockedSlotsMeta: (franchise, metric) => set({ lockedSlotsFranchise: franchise, lockedSlotsMetric: metric }),
+
       // Filters
       getPlayersByFranchise: (franchise) => {
         const state = get()
@@ -457,6 +476,8 @@ export const usePlayerStore = create<PlayerStore>()(
         pitchingProspects: state.pitchingProspects,
         zipsBatters: state.zipsBatters,
         zipsPitchers: state.zipsPitchers,
+        zipsDcBatters: state.zipsDcBatters,
+        zipsDcPitchers: state.zipsDcPitchers,
         freeAgentEntries: state.freeAgentEntries,
         fvRankings: state.fvRankings,
         fpRankings: state.fpRankings,
@@ -466,6 +487,9 @@ export const usePlayerStore = create<PlayerStore>()(
         rfoDraftPicks: state.rfoDraftPicks,
         rfoUnavailable: state.rfoUnavailable,
         rfoDraftCursor: state.rfoDraftCursor,
+        lockedSlots: state.lockedSlots,
+        lockedSlotsFranchise: state.lockedSlotsFranchise,
+        lockedSlotsMetric: state.lockedSlotsMetric,
         franchiseMappings: state.franchiseMappings,
         nameMappings: state.nameMappings,
       }),
