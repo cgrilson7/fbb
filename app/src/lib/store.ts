@@ -16,7 +16,11 @@ import type {
   SalaryReliefDesignation,
   FVRanking,
   FantasyProsRanking,
-  RfoDraftPick
+  RfoDraftPick,
+  CloserEntry,
+  CloserMonkeyEntry,
+  FGMinorsBatter,
+  FGMinorsPitcher
 } from '@/types'
 import { normalize } from './normalize'
 import { idbStorage } from './idb-storage'
@@ -54,9 +58,15 @@ interface PlayerStore {
   zipsPitchers: ZipsPitcher[]
   zipsDcBatters: ZipsBatter[]
   zipsDcPitchers: ZipsPitcher[]
+  zipsRosBatters: ZipsBatter[]
+  zipsRosPitchers: ZipsPitcher[]
   freeAgentEntries: FreeAgentEntry[]
   fvRankings: FVRanking[]
   fpRankings: FantasyProsRanking[]
+  closers: CloserEntry[]
+  closerMonkey: CloserMonkeyEntry[]
+  fgMinorsBatters: FGMinorsBatter[]
+  fgMinorsPitchers: FGMinorsPitcher[]
 
   // Joined data
   players: Player[]
@@ -98,9 +108,15 @@ interface PlayerStore {
   setZipsPitchers: (pitchers: ZipsPitcher[]) => void
   setZipsDcBatters: (batters: ZipsBatter[]) => void
   setZipsDcPitchers: (pitchers: ZipsPitcher[]) => void
+  setZipsRosBatters: (batters: ZipsBatter[]) => void
+  setZipsRosPitchers: (pitchers: ZipsPitcher[]) => void
   setFreeAgentEntries: (entries: FreeAgentEntry[]) => void
   setFVRankings: (rankings: FVRanking[]) => void
   setFPRankings: (rankings: FantasyProsRanking[]) => void
+  setClosers: (closers: CloserEntry[]) => void
+  setCloserMonkey: (entries: CloserMonkeyEntry[]) => void
+  setFGMinorsBatters: (batters: FGMinorsBatter[]) => void
+  setFGMinorsPitchers: (pitchers: FGMinorsPitcher[]) => void
 
   // Join data from all sources
   joinData: () => void
@@ -142,9 +158,15 @@ export const usePlayerStore = create<PlayerStore>()(
       zipsPitchers: [],
       zipsDcBatters: [],
       zipsDcPitchers: [],
+      zipsRosBatters: [],
+      zipsRosPitchers: [],
       freeAgentEntries: [],
       fvRankings: [],
       fpRankings: [],
+      closers: [],
+      closerMonkey: [],
+      fgMinorsBatters: [],
+      fgMinorsPitchers: [],
       players: [],
       salaryReliefDesignations: [],
       poolDrafted: [],
@@ -169,14 +191,20 @@ export const usePlayerStore = create<PlayerStore>()(
       setZipsPitchers: (pitchers) => set({ zipsPitchers: pitchers }),
       setZipsDcBatters: (batters) => set({ zipsDcBatters: batters }),
       setZipsDcPitchers: (pitchers) => set({ zipsDcPitchers: pitchers }),
+      setZipsRosBatters: (batters) => set({ zipsRosBatters: batters }),
+      setZipsRosPitchers: (pitchers) => set({ zipsRosPitchers: pitchers }),
       setFreeAgentEntries: (entries) => set({ freeAgentEntries: entries }),
       setFVRankings: (rankings) => set({ fvRankings: rankings }),
       setFPRankings: (rankings) => set({ fpRankings: rankings }),
+      setClosers: (closers) => set({ closers }),
+      setCloserMonkey: (entries) => set({ closerMonkey: entries }),
+      setFGMinorsBatters: (batters) => set({ fgMinorsBatters: batters }),
+      setFGMinorsPitchers: (pitchers) => set({ fgMinorsPitchers: pitchers }),
 
       // Join data from all sources
       joinData: () => {
         const state = get()
-        const { rawPlayers, hkbPlayers, salaries, battingProspects, pitchingProspects, zipsBatters, zipsPitchers, zipsDcBatters, zipsDcPitchers, fvRankings, fpRankings, nameMappings, franchiseMappings } = state
+        const { rawPlayers, hkbPlayers, salaries, battingProspects, pitchingProspects, zipsBatters, zipsPitchers, zipsDcBatters, zipsDcPitchers, zipsRosBatters, zipsRosPitchers, fvRankings, fpRankings, nameMappings, franchiseMappings } = state
 
         // Create lookup maps
         const hkbMap = new Map<string, HKBPlayer>()
@@ -202,6 +230,12 @@ export const usePlayerStore = create<PlayerStore>()(
 
         const zipsDcPitcherMap = new Map<string, ZipsPitcher>()
         zipsDcPitchers.forEach(p => zipsDcPitcherMap.set(p.normalizedName, p))
+
+        const zipsRosBatterMap = new Map<string, ZipsBatter>()
+        zipsRosBatters.forEach(p => zipsRosBatterMap.set(p.normalizedName, p))
+
+        const zipsRosPitcherMap = new Map<string, ZipsPitcher>()
+        zipsRosPitchers.forEach(p => zipsRosPitcherMap.set(p.normalizedName, p))
 
         const fvRankingMap = new Map<string, FVRanking>()
         fvRankings.forEach(p => fvRankingMap.set(p.normalizedName, p))
@@ -278,10 +312,14 @@ export const usePlayerStore = create<PlayerStore>()(
             }),
           } : null
 
-          // Build ZipsProjection from batter/pitcher data
+          // Build ZipsProjection from batter/pitcher data. Match on the player's
+          // actual role so same-name batter/pitcher collisions (e.g. star 3B
+          // "José Ramírez" vs a reliever of the same name) don't cross over.
+          const projPositions = player.position.split(',').map(s => s.trim())
+          const playerIsPitcher = projPositions.includes('SP') || projPositions.includes('RP')
           const buildProjection = (bMap: Map<string, ZipsBatter>, pMap: Map<string, ZipsPitcher>): ZipsProjection | null => {
-            const b = bMap.get(normalizedName)
-            const p = pMap.get(normalizedName)
+            const b = playerIsPitcher ? undefined : bMap.get(normalizedName)
+            const p = playerIsPitcher ? pMap.get(normalizedName) : undefined
             if (b) {
               return {
                 type: 'batter',
@@ -295,6 +333,7 @@ export const usePlayerStore = create<PlayerStore>()(
                 type: 'pitcher',
                 war: p.war, fpts: p.fpts, fptsRate: p.fptsPerIP,
                 w: p.w, qs: p.qs, era: p.era, sv: p.sv, hld: p.hld,
+                g: p.g, gs: p.gs,
                 k: p.k, ip: p.ip, hAllowed: p.h, bbPitching: p.bb, er: p.er,
                 bb9: p.bb9, whip: p.whip,
               }
@@ -304,6 +343,7 @@ export const usePlayerStore = create<PlayerStore>()(
 
           const zipsProjection = buildProjection(zipsBatterMap, zipsPitcherMap)
           const zipsDcProjection = buildProjection(zipsDcBatterMap, zipsDcPitcherMap)
+          const zipsRosProjection = buildProjection(zipsRosBatterMap, zipsRosPitcherMap)
 
           // FantasyPros ranking data
           const fpRanking = fpRankingMap.get(normalizedName)
@@ -349,6 +389,7 @@ export const usePlayerStore = create<PlayerStore>()(
             fvPosition,
             zipsProjection,
             zipsDcProjection,
+            zipsRosProjection,
             matchConfidence: hkb ? 1 : 0.5,
           }
         })
@@ -478,9 +519,15 @@ export const usePlayerStore = create<PlayerStore>()(
         zipsPitchers: state.zipsPitchers,
         zipsDcBatters: state.zipsDcBatters,
         zipsDcPitchers: state.zipsDcPitchers,
+        zipsRosBatters: state.zipsRosBatters,
+        zipsRosPitchers: state.zipsRosPitchers,
         freeAgentEntries: state.freeAgentEntries,
         fvRankings: state.fvRankings,
         fpRankings: state.fpRankings,
+        closers: state.closers,
+        closerMonkey: state.closerMonkey,
+        fgMinorsBatters: state.fgMinorsBatters,
+        fgMinorsPitchers: state.fgMinorsPitchers,
         salaryReliefDesignations: state.salaryReliefDesignations,
         poolDrafted: state.poolDrafted,
         poolUnavailable: state.poolUnavailable,

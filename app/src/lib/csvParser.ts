@@ -10,21 +10,33 @@ import type {
   ZipsPitcher,
   FreeAgentEntry,
   FVRanking,
-  FantasyProsRanking
+  FantasyProsRanking,
+  CloserEntry,
+  CloserMonkeyEntry,
+  FGMinorsBatter,
+  FGMinorsPitcher
 } from '@/types'
 
-export type FileType = 'players' | 'hkb' | 'salaries' | 'battingProspects' | 'pitchingProspects' | 'zipsBatters' | 'zipsPitchers' | 'zipsDcBatters' | 'zipsDcPitchers' | 'freeAgency' | 'fvRankings' | 'fpRankings'
+export type FileType = 'players' | 'hkb' | 'salaries' | 'battingProspects' | 'pitchingProspects' | 'zipsBatters' | 'zipsPitchers' | 'zipsDcBatters' | 'zipsDcPitchers' | 'zipsRosBatters' | 'zipsRosPitchers' | 'freeAgency' | 'fvRankings' | 'fpRankings' | 'closers' | 'closermonkey' | 'fgMinorsBatters' | 'fgMinorsPitchers'
 
 export function detectFileType(filename: string): FileType | null {
   const lower = filename.toLowerCase()
   // Check harryknowsball FIRST (contains "all" which would match players)
   if (lower.includes('harryknowsball') || lower.includes('hkb')) return 'hkb'
   if (lower.includes('salaries') || lower.includes('salary')) return 'salaries'
+  if (lower.includes('closermonkey')) return 'closermonkey'
+  if (lower.includes('closer')) return 'closers'
   if (lower.includes('fantasypros')) return 'fpRankings'
   if (lower.includes('fv') && lower.includes('rank')) return 'fvRankings'
   if (lower.includes('free') && lower.includes('agen')) return 'freeAgency'
+  if (lower.includes('fangraphs') && lower.includes('minors') && lower.includes('batter')) return 'fgMinorsBatters'
+  if (lower.includes('fangraphs') && lower.includes('minors') && lower.includes('pitcher')) return 'fgMinorsPitchers'
   if (lower.includes('batting') && lower.includes('prospect')) return 'battingProspects'
   if (lower.includes('pitching') && lower.includes('prospect')) return 'pitchingProspects'
+  // ZiPS projections — check ROS (rest-of-season) before DC/regular, since ROS
+  // filenames also contain "dc"/"batter" (e.g. zips_dc_ros_advanced_batters.csv)
+  if (lower.includes('zips') && lower.includes('ros') && lower.includes('batter')) return 'zipsRosBatters'
+  if (lower.includes('zips') && lower.includes('ros') && lower.includes('pitcher')) return 'zipsRosPitchers'
   // ZiPS projections (check DC before regular)
   if (lower.includes('zips') && lower.includes('dc') && lower.includes('batter')) return 'zipsDcBatters'
   if (lower.includes('zips') && lower.includes('dc') && lower.includes('pitcher')) return 'zipsDcPitchers'
@@ -78,9 +90,11 @@ function transformData(rows: Record<string, string>[], type: FileType): unknown[
       return rows.map(transformPitchingProspect)
     case 'zipsBatters':
     case 'zipsDcBatters':
+    case 'zipsRosBatters':
       return rows.map(transformZipsBatter)
     case 'zipsPitchers':
     case 'zipsDcPitchers':
+    case 'zipsRosPitchers':
       return rows.map(transformZipsPitcher)
     case 'freeAgency':
       return rows.map(transformFreeAgency)
@@ -88,6 +102,14 @@ function transformData(rows: Record<string, string>[], type: FileType): unknown[
       return rows.map(transformFVRanking)
     case 'fpRankings':
       return rows.filter(row => (row['PLAYER NAME'] || row['Player Name'] || '').trim() !== '').map(transformFPRanking)
+    case 'closers':
+      return rows.map(transformCloser)
+    case 'closermonkey':
+      return rows.filter(row => (row['Team'] || '').trim() !== '').map(transformCloserMonkey)
+    case 'fgMinorsBatters':
+      return rows.filter(row => (row['Name'] || '').trim() !== '').map(transformFGMinorsBatter)
+    case 'fgMinorsPitchers':
+      return rows.filter(row => (row['Name'] || '').trim() !== '').map(transformFGMinorsPitcher)
     default:
       return rows
   }
@@ -130,6 +152,7 @@ function transformPlayer(row: Record<string, string>): Player {
     fvPosition: null,
     zipsProjection: null,
     zipsDcProjection: null,
+    zipsRosProjection: null,
     // Derived
     isAvailable: status === 'FA' || isWaiver,
     isWaiver,
@@ -169,9 +192,9 @@ function transformSalary(row: Record<string, string>): SalaryEntry {
   const playerName = getValue(['Player Name', 'Player'])
   const salaryByYear: Record<number, number> = {}
 
-  // Parse yearly salary columns (2025, 2026, ... 2031)
+  // Parse yearly salary columns (2025, 2026, ... 2040)
   // Format: "2026 Salary Hit" or similar
-  for (let year = 2025; year <= 2031; year++) {
+  for (let year = 2025; year <= 2040; year++) {
     const key = Object.keys(row).find(k =>
       k.includes(year.toString()) && k.toLowerCase().includes('salary')
     )
@@ -292,6 +315,8 @@ function transformZipsPitcher(row: Record<string, string>): ZipsPitcher {
     era: parseFloat(row['ERA'] || '0'),
     sv: parseInt(row['SV'] || '0', 10),
     hld: parseInt(row['HLD'] || '0', 10),
+    g: parseInt(row['G'] || '0', 10),
+    gs: parseInt(row['GS'] || '0', 10),
     ip: parseFloat(row['IP'] || '0'),
     h: parseInt(row['H'] || '0', 10),
     bb: parseInt(row['BB'] || '0', 10),
@@ -380,6 +405,89 @@ function transformFPRanking(row: Record<string, string>): FantasyProsRanking {
   }
 }
 
+function transformCloser(row: Record<string, string>): CloserEntry {
+  const name = row['Player'] || ''
+  return {
+    team: row['Team'] || '',
+    player: name,
+    throws: row['Throws'] || '',
+    role: row['Role'] || '',
+    vfa: parseNumber(row['vFA']),
+    vsi: parseNumber(row['vSI']),
+    g: parseNumber(row['G']),
+    ip: parseNumber(row['IP']),
+    era: parseNumber(row['ERA']),
+    sv: parseNumber(row['SV']),
+    hld: parseNumber(row['HLD']),
+    k9: parseNumber(row['K9']),
+    kpct: parseNumber(row['KPct']),
+    nameAscii: row['NameASCII'] || name,
+    normalizedName: normalize(row['NameASCII'] || name),
+  }
+}
+
+function transformCloserMonkey(row: Record<string, string>): CloserMonkeyEntry {
+  const isCommittee = (row['Committee'] || '').trim() === '*'
+  return {
+    team: (row['Team'] || '').trim(),
+    closer: (row['Closer'] || '').trim(),
+    firstInLine: (row['1st in Line'] || '').trim(),
+    secondInLine: (row['2nd in Line'] || '').trim(),
+    updated: (row['Updated'] || '').trim(),
+    isCommittee,
+    closerNormalized: normalize(row['Closer'] || ''),
+    firstNormalized: normalize(row['1st in Line'] || ''),
+    secondNormalized: normalize(row['2nd in Line'] || ''),
+  }
+}
+
+function transformFGMinorsBatter(row: Record<string, string>): FGMinorsBatter {
+  const name = row['Name'] || ''
+  return {
+    name,
+    team: row['Team'] || '',
+    level: row['Level'] || '',
+    age: parseInt(row['Age'] || '0', 10),
+    pa: parseInt(row['PA'] || '0', 10),
+    bbPct: parseFloat(row['BB%']?.replace('%', '') || '0'),
+    kPct: parseFloat(row['K%']?.replace('%', '') || '0'),
+    avg: parseFloat(row['AVG'] || '0'),
+    obp: parseFloat(row['OBP'] || '0'),
+    slg: parseFloat(row['SLG'] || '0'),
+    ops: parseFloat(row['OPS'] || '0'),
+    iso: parseFloat(row['ISO'] || '0'),
+    babip: parseFloat(row['BABIP'] || '0'),
+    woba: parseFloat(row['wOBA'] || '0'),
+    wrcPlus: parseFloat(row['wRC+'] || '0'),
+    playerId: row['PlayerId'] || '',
+    normalizedName: normalize(name),
+  }
+}
+
+function transformFGMinorsPitcher(row: Record<string, string>): FGMinorsPitcher {
+  const name = row['Name'] || ''
+  return {
+    name,
+    team: row['Team'] || '',
+    level: row['Level'] || '',
+    age: parseInt(row['Age'] || '0', 10),
+    ip: parseFloat(row['IP'] || '0'),
+    k9: parseFloat(row['K/9'] || '0'),
+    bb9: parseFloat(row['BB/9'] || '0'),
+    kPct: parseFloat(row['K%']?.replace('%', '') || '0'),
+    bbPct: parseFloat(row['BB%']?.replace('%', '') || '0'),
+    kMinusBbPct: parseFloat(row['K-BB%']?.replace('%', '') || '0'),
+    whip: parseFloat(row['WHIP'] || '0'),
+    babip: parseFloat(row['BABIP'] || '0'),
+    lobPct: parseFloat(row['LOB%']?.replace('%', '') || '0'),
+    era: parseFloat(row['ERA'] || '0'),
+    fip: parseFloat(row['FIP'] || '0'),
+    xfip: parseFloat(row['xFIP'] || '0'),
+    playerId: row['PlayerId'] || '',
+    normalizedName: normalize(name),
+  }
+}
+
 export function parseCSVText<T>(text: string, type: FileType): T[] {
   const results = Papa.parse(text, {
     header: true,
@@ -398,9 +506,15 @@ const DEFAULT_DATA_MANIFEST: { url: string; type: FileType }[] = [
   { url: '/data/zips_pitchers.csv', type: 'zipsPitchers' },
   { url: '/data/zips_dc_batters.csv', type: 'zipsDcBatters' },
   { url: '/data/zips_dc_pitchers.csv', type: 'zipsDcPitchers' },
+  { url: '/data/zips_dc_ros_advanced_batters.csv', type: 'zipsRosBatters' },
+  { url: '/data/zips_dc_ros_advanced_pitchers.csv', type: 'zipsRosPitchers' },
   { url: '/data/free_agency.csv', type: 'freeAgency' },
   { url: '/data/fv_rankings.csv', type: 'fvRankings' },
   { url: '/data/fantasypros_dynasty_rankings.csv', type: 'fpRankings' },
+  { url: '/data/closers.csv', type: 'closers' },
+  { url: '/data/closermonkey.csv', type: 'closermonkey' },
+  { url: '/data/fangraphs_minors_batters.csv', type: 'fgMinorsBatters' },
+  { url: '/data/fangraphs_minors_pitchers.csv', type: 'fgMinorsPitchers' },
 ]
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -421,9 +535,15 @@ export async function fetchAndLoadDefaults(
     zipsPitchers: 'zipsPitchers',
     zipsDcBatters: 'zipsDcBatters',
     zipsDcPitchers: 'zipsDcPitchers',
+    zipsRosBatters: 'zipsRosBatters',
+    zipsRosPitchers: 'zipsRosPitchers',
     freeAgency: 'freeAgentEntries',
     fvRankings: 'fvRankings',
     fpRankings: 'fpRankings',
+    closers: 'closers',
+    closermonkey: 'closerMonkey',
+    fgMinorsBatters: 'fgMinorsBatters',
+    fgMinorsPitchers: 'fgMinorsPitchers',
   }
 
   const setterMap: Record<FileType, string> = {
@@ -436,9 +556,15 @@ export async function fetchAndLoadDefaults(
     zipsPitchers: 'setZipsPitchers',
     zipsDcBatters: 'setZipsDcBatters',
     zipsDcPitchers: 'setZipsDcPitchers',
+    zipsRosBatters: 'setZipsRosBatters',
+    zipsRosPitchers: 'setZipsRosPitchers',
     freeAgency: 'setFreeAgentEntries',
     fvRankings: 'setFVRankings',
     fpRankings: 'setFPRankings',
+    closers: 'setClosers',
+    closermonkey: 'setCloserMonkey',
+    fgMinorsBatters: 'setFGMinorsBatters',
+    fgMinorsPitchers: 'setFGMinorsPitchers',
   }
 
   // Always fetch all bundled files so deploys with updated CSVs take effect

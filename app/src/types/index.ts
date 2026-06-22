@@ -35,6 +35,8 @@ export interface Player {
   // Joined from ZiPS
   zipsProjection: ZipsProjection | null
   zipsDcProjection: ZipsProjection | null
+  // ZiPS DC rest-of-season (advanced) — powers waiver-wire FPTS
+  zipsRosProjection: ZipsProjection | null
   // Derived
   isAvailable: boolean
   isWaiver: boolean
@@ -137,6 +139,47 @@ export interface PitchingProspect {
   normalizedName: string
 }
 
+export interface FGMinorsBatter {
+  name: string
+  team: string
+  level: string
+  age: number
+  pa: number
+  bbPct: number
+  kPct: number
+  avg: number
+  obp: number
+  slg: number
+  ops: number
+  iso: number
+  babip: number
+  woba: number
+  wrcPlus: number
+  playerId: string
+  normalizedName: string
+}
+
+export interface FGMinorsPitcher {
+  name: string
+  team: string
+  level: string
+  age: number
+  ip: number
+  k9: number
+  bb9: number
+  kPct: number
+  bbPct: number
+  kMinusBbPct: number
+  whip: number
+  babip: number
+  lobPct: number
+  era: number
+  fip: number
+  xfip: number
+  playerId: string
+  normalizedName: string
+}
+
 export interface FranchiseMapping {
   shortCode: string
   fullName: string
@@ -191,6 +234,8 @@ export interface ZipsPitcher {
   era: number
   sv: number
   hld: number
+  g: number
+  gs: number
   ip: number
   h: number
   bb: number
@@ -259,6 +304,37 @@ export interface FantasyProsRanking {
   normalizedName: string
 }
 
+export interface CloserEntry {
+  team: string
+  player: string
+  throws: string
+  role: string
+  vfa: number | null
+  vsi: number | null
+  g: number | null
+  ip: number | null
+  era: number | null
+  sv: number | null
+  hld: number | null
+  k9: number | null
+  kpct: number | null
+  nameAscii: string
+  normalizedName: string
+}
+
+export interface CloserMonkeyEntry {
+  team: string
+  closer: string
+  firstInLine: string
+  secondInLine: string
+  updated: string
+  isCommittee: boolean
+  // Normalized names for matching against player database
+  closerNormalized: string
+  firstNormalized: string
+  secondNormalized: string
+}
+
 export interface ZipsProjection {
   type: 'batter' | 'pitcher'
   war: number
@@ -289,6 +365,8 @@ export interface ZipsProjection {
   era?: number
   sv?: number
   hld?: number
+  g?: number
+  gs?: number
   k?: number
   ip?: number
   hAllowed?: number

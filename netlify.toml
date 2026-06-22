@@ -1,0 +1,3 @@
+[build]
+  command = "# no build needed, pre-built locally"
+  publish = "out"

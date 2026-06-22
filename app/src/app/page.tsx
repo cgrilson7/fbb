@@ -24,6 +24,9 @@ const fileTypes: { type: FileType; label: string; description: string }[] = [
   { type: 'freeAgency', label: 'free_agency.csv', description: 'Free agent auction tracker' },
   { type: 'fvRankings', label: 'fv_rankings.csv', description: 'FanGraphs Future Value rankings' },
   { type: 'fpRankings', label: 'fantasypros_dynasty_rankings.csv', description: 'FantasyPros dynasty rankings' },
+  { type: 'closers', label: 'closers.csv', description: 'Closer depth charts (closermonkey.com)' },
+  { type: 'fgMinorsBatters', label: 'fangraphs_minors_batters.csv', description: 'FanGraphs MiLB batting stats' },
+  { type: 'fgMinorsPitchers', label: 'fangraphs_minors_pitchers.csv', description: 'FanGraphs MiLB pitching stats' },
 ]
 
 // Map file types to store state keys
@@ -37,9 +40,15 @@ const storeKeyMap: Record<FileType, string> = {
   zipsPitchers: 'zipsPitchers',
   zipsDcBatters: 'zipsDcBatters',
   zipsDcPitchers: 'zipsDcPitchers',
+  zipsRosBatters: 'zipsRosBatters',
+  zipsRosPitchers: 'zipsRosPitchers',
   freeAgency: 'freeAgentEntries',
   fvRankings: 'fvRankings',
   fpRankings: 'fpRankings',
+  closers: 'closers',
+  closermonkey: 'closerMonkey',
+  fgMinorsBatters: 'fgMinorsBatters',
+  fgMinorsPitchers: 'fgMinorsPitchers',
 }
 
 export default function UploadPage() {
@@ -53,13 +62,19 @@ export default function UploadPage() {
     zipsPitchers: { type: 'zipsPitchers', status: 'pending' },
     zipsDcBatters: { type: 'zipsDcBatters', status: 'pending' },
     zipsDcPitchers: { type: 'zipsDcPitchers', status: 'pending' },
+    zipsRosBatters: { type: 'zipsRosBatters', status: 'pending' },
+    zipsRosPitchers: { type: 'zipsRosPitchers', status: 'pending' },
     freeAgency: { type: 'freeAgency', status: 'pending' },
     fvRankings: { type: 'fvRankings', status: 'pending' },
     fpRankings: { type: 'fpRankings', status: 'pending' },
+    closers: { type: 'closers', status: 'pending' },
+    closermonkey: { type: 'closermonkey', status: 'pending' },
+    fgMinorsBatters: { type: 'fgMinorsBatters', status: 'pending' },
+    fgMinorsPitchers: { type: 'fgMinorsPitchers', status: 'pending' },
   })
 
   const store = usePlayerStore()
-  const { setPlayers, setHKB, setSalaries, setBattingProspects, setPitchingProspects, setZipsBatters, setZipsPitchers, setZipsDcBatters, setZipsDcPitchers, setFreeAgentEntries, setFVRankings, setFPRankings, joinData } = store
+  const { setPlayers, setHKB, setSalaries, setBattingProspects, setPitchingProspects, setZipsBatters, setZipsPitchers, setZipsDcBatters, setZipsDcPitchers, setZipsRosBatters, setZipsRosPitchers, setFreeAgentEntries, setFVRankings, setFPRankings, setClosers, setCloserMonkey, joinData } = store
   const hasHydrated = useHydration()
 
   const [isJoining, setIsJoining] = useState(false)
@@ -148,6 +163,12 @@ export default function UploadPage() {
           case 'zipsDcPitchers':
             setZipsDcPitchers(data)
             break
+          case 'zipsRosBatters':
+            setZipsRosBatters(data)
+            break
+          case 'zipsRosPitchers':
+            setZipsRosPitchers(data)
+            break
           case 'freeAgency':
             setFreeAgentEntries(data)
             break
@@ -156,6 +177,12 @@ export default function UploadPage() {
             break
           case 'fpRankings':
             setFPRankings(data)
+            break
+          case 'closers':
+            setClosers(data)
+            break
+          case 'closermonkey':
+            setCloserMonkey(data)
             break
         }
 
