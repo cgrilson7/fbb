@@ -23,12 +23,27 @@ function getLevelBadgeColor(level: string): string {
   return 'bg-gray-100 text-gray-800 dark:bg-gray-600 dark:text-gray-100'
 }
 
+// FanGraphs aggregates a season into one row; `Level` is a comma-joined list of
+// every level played (e.g. "AA,AAA"). Treat the highest level reached as the
+// player's current level — that's the relevant one for prospect evaluation.
+function getLevelParts(level: string): string[] {
+  return level.split(',').map(s => s.trim()).filter(Boolean)
+}
+
+function topLevel(level: string): string {
+  const parts = getLevelParts(level)
+  if (parts.length === 0) return ''
+  return parts.reduce((best, lv) => (LEVEL_ORDER[lv] ?? 99) < (LEVEL_ORDER[best] ?? 99) ? lv : best)
+}
+
 export default function ProspectsPage() {
   const { fgMinorsBatters, fgMinorsPitchers, players, hkbPlayers, fvRankings, franchiseMappings } = usePlayerStore()
   const hasHydrated = useHydration()
   const [search, setSearch] = useState('')
   const [prospectType, setProspectType] = useState<ProspectType>('all')
   const [levelFilter, setLevelFilter] = useState('')
+  const [minPa, setMinPa] = useState('')
+  const [minIp, setMinIp] = useState('')
   const [teamFilter, setTeamFilter] = useState('')
   const [franchiseFilter, setFranchiseFilter] = useState('')
   const [showAvailableOnly, setShowAvailableOnly] = useState(false)
@@ -55,6 +70,7 @@ export default function ProspectsPage() {
 
       return {
         ...prospect,
+        currentLevel: topLevel(prospect.level),
         isAvailable: player?.isAvailable ?? true,
         status,
         franchise,
@@ -69,7 +85,7 @@ export default function ProspectsPage() {
   }, [fgMinorsBatters, fgMinorsPitchers, players, hkbPlayers, fvRankings, franchiseMappings])
 
   const levels = useMemo(() => {
-    const allLevels = new Set(enrichedProspects.map(p => p.level).filter(Boolean))
+    const allLevels = new Set(enrichedProspects.map(p => p.currentLevel).filter(Boolean))
     return Array.from(allLevels).sort((a, b) => (LEVEL_ORDER[a] ?? 99) - (LEVEL_ORDER[b] ?? 99))
   }, [enrichedProspects])
 
@@ -99,7 +115,17 @@ export default function ProspectsPage() {
     }
 
     if (levelFilter) {
-      result = result.filter(p => p.level === levelFilter)
+      result = result.filter(p => p.currentLevel === levelFilter)
+    }
+
+    const minPaNum = minPa ? parseInt(minPa, 10) : 0
+    if (minPaNum > 0) {
+      result = result.filter(p => p.type !== 'batting' || (p as typeof p & { pa: number }).pa >= minPaNum)
+    }
+
+    const minIpNum = minIp ? parseFloat(minIp) : 0
+    if (minIpNum > 0) {
+      result = result.filter(p => p.type !== 'pitching' || (p as typeof p & { ip: number }).ip >= minIpNum)
     }
 
     if (teamFilter) {
@@ -121,7 +147,7 @@ export default function ProspectsPage() {
       switch (sortField) {
         case 'name': aVal = a.name; bVal = b.name; break
         case 'team': aVal = a.team; bVal = b.team; break
-        case 'level': aVal = LEVEL_ORDER[a.level] ?? 99; bVal = LEVEL_ORDER[b.level] ?? 99; break
+        case 'level': aVal = LEVEL_ORDER[a.currentLevel] ?? 99; bVal = LEVEL_ORDER[b.currentLevel] ?? 99; break
         case 'franchise': aVal = a.franchise; bVal = b.franchise; break
         case 'age': aVal = a.age; bVal = b.age; break
         case 'hkbRank': aVal = a.hkbRank; bVal = b.hkbRank; break
@@ -170,7 +196,7 @@ export default function ProspectsPage() {
     })
 
     return result
-  }, [enrichedProspects, prospectType, search, levelFilter, teamFilter, franchiseFilter, showAvailableOnly, sortField, sortOrder])
+  }, [enrichedProspects, prospectType, search, levelFilter, minPa, minIp, teamFilter, franchiseFilter, showAvailableOnly, sortField, sortOrder])
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -194,11 +220,13 @@ export default function ProspectsPage() {
     setSearch('')
     setShowAvailableOnly(false)
     setLevelFilter('')
+    setMinPa('')
+    setMinIp('')
     setTeamFilter('')
     setFranchiseFilter('')
   }
 
-  const hasFilters = search || showAvailableOnly || levelFilter || teamFilter || franchiseFilter
+  const hasFilters = search || showAvailableOnly || levelFilter || minPa || minIp || teamFilter || franchiseFilter
 
   if (!hasHydrated) {
     return (
@@ -257,6 +285,28 @@ export default function ProspectsPage() {
             <option value="">All levels</option>
             {levels.map(level => <option key={level} value={level}>{level}</option>)}
           </select>
+
+          {(prospectType === 'all' || prospectType === 'batting') && (
+            <input
+              type="number"
+              min="0"
+              placeholder="Min PA"
+              value={minPa}
+              onChange={(e) => setMinPa(e.target.value)}
+              className="w-24 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+            />
+          )}
+
+          {(prospectType === 'all' || prospectType === 'pitching') && (
+            <input
+              type="number"
+              min="0"
+              placeholder="Min IP"
+              value={minIp}
+              onChange={(e) => setMinIp(e.target.value)}
+              className="w-24 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+            />
+          )}
 
           <select value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)} className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
             <option value="">All orgs</option>
@@ -331,10 +381,15 @@ export default function ProspectsPage() {
                   </td>
                   <td className="px-3 py-2 text-sm font-medium text-gray-900 dark:text-white">{p.name}</td>
                   <td className="px-3 py-2 text-sm text-gray-600 dark:text-gray-400">{p.team}</td>
-                  <td className="px-3 py-2 text-sm">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${getLevelBadgeColor(p.level)}`}>
-                      {p.level}
+                  <td className="px-3 py-2 text-sm whitespace-nowrap">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${getLevelBadgeColor(p.currentLevel)}`}>
+                      {p.currentLevel || '—'}
                     </span>
+                    {getLevelParts(p.level).length > 1 && (
+                      <span className="ml-1.5 text-xs text-gray-400 dark:text-gray-500">
+                        {getLevelParts(p.level).filter(lv => lv !== p.currentLevel).join(', ')}
+                      </span>
+                    )}
                   </td>
                   <td className="px-3 py-2 text-sm text-gray-600 dark:text-gray-400">{p.age}</td>
                   <td className="px-3 py-2 text-sm">
