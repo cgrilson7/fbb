@@ -195,51 +195,53 @@ interface ResolvedTarget {
 }
 
 // ------------------------------------------------------------
-// 3-year outlook: ZiPS 2026 fantasy points normalized to a full
-// season (FPTS/G × 150 for hitters; FPTS/IP × 175 for SP, × 65
-// for RP), then aged. Multiplier is per year at the age the
-// player will be that season.
+// 3-year outlook: real FanGraphs ZiPS projections for 2026, 2027
+// and 2028, each normalized to a full season of playing time
+// (FPTS/G × 150 for hitters; FPTS/IP × 175 for SP, × 65 for RP)
+// so the trend reflects projected skill, not playing-time noise.
 // ------------------------------------------------------------
-function agingFactor(age: number): number {
-  if (age <= 25) return 1.03
-  if (age <= 29) return 1.0
-  if (age <= 32) return 0.95
-  if (age <= 35) return 0.91
-  return 0.85
+interface ZipsYearMaps {
+  bat: Map<string, ZipsBatter>
+  pit: Map<string, ZipsPitcher>
+}
+
+function seasonRate(maps: ZipsYearMaps, key: string): number | null {
+  const bat = maps.bat.get(key)
+  if (bat && bat.fptsPerG > 0) return bat.fptsPerG * 150
+  const pit = maps.pit.get(key)
+  if (pit && pit.fptsPerIP > 0) return pit.fptsPerIP * (pit.gs > 5 ? 175 : 65)
+  return null
 }
 
 interface ThreeYear {
-  y26: number
-  y27: number
-  y28: number
+  y26: number | null
+  y27: number | null
+  y28: number | null
 }
 
-function threeYearOutlook(
-  name: string,
-  age: number | null,
-  zipsBatByName: Map<string, ZipsBatter>,
-  zipsPitByName: Map<string, ZipsPitcher>
-): ThreeYear | null {
+function threeYearOutlook(name: string, y26m: ZipsYearMaps, y27m: ZipsYearMaps, y28m: ZipsYearMaps): ThreeYear | null {
   const key = normalize(name)
-  const bat = zipsBatByName.get(key)
-  const pit = zipsPitByName.get(key)
-  let base: number | null = null
-  if (bat && bat.fptsPerG > 0) base = bat.fptsPerG * 150
-  else if (pit && pit.fptsPerIP > 0) base = pit.fptsPerIP * (pit.gs > 5 ? 175 : 65)
-  if (base === null) return null
-  const a = age ?? 29
-  const y27 = base * agingFactor(a + 1)
-  const y28 = y27 * agingFactor(a + 2)
-  return { y26: Math.round(base), y27: Math.round(y27), y28: Math.round(y28) }
+  const y26 = seasonRate(y26m, key)
+  const y27 = seasonRate(y27m, key)
+  const y28 = seasonRate(y28m, key)
+  if (y26 === null && y27 === null && y28 === null) return null
+  const r = (v: number | null) => (v === null ? null : Math.round(v))
+  return { y26: r(y26), y27: r(y27), y28: r(y28) }
 }
 
 function OutlookCell({ o }: { o: ThreeYear | null }) {
   if (!o) return <span className="text-gray-400">—</span>
-  const pct28 = o.y26 > 0 ? o.y28 / o.y26 : 1
-  const cls = pct28 < 0.8 ? 'text-red-600 dark:text-red-400' : pct28 > 1.02 ? 'text-green-600 dark:text-green-400' : 'text-gray-600 dark:text-gray-300'
+  const pct28 = o.y26 && o.y28 ? o.y28 / o.y26 : null
+  const cls =
+    pct28 !== null && pct28 < 0.8
+      ? 'text-red-600 dark:text-red-400'
+      : pct28 !== null && pct28 > 1.05
+        ? 'text-green-600 dark:text-green-400'
+        : 'text-gray-600 dark:text-gray-300'
+  const f = (v: number | null) => (v === null ? '—' : v)
   return (
     <span className={`whitespace-nowrap ${cls}`}>
-      {o.y26} → {o.y27} → {o.y28}
+      {f(o.y26)} → {f(o.y27)} → {f(o.y28)}
     </span>
   )
 }
@@ -316,19 +318,21 @@ function heatColor(points: number | null, teamCount: number): string {
 // ============================================================
 
 export default function DeadlinePage() {
-  const { standings, players, salaries, fvRankings, zipsBatters, zipsPitchers } = usePlayerStore()
+  const { standings, players, salaries, fvRankings, zipsBatters, zipsPitchers, zips27Batters, zips27Pitchers, zips28Batters, zips28Pitchers } = usePlayerStore()
 
-  const zipsBatByName = useMemo(() => {
-    const m = new Map<string, ZipsBatter>()
-    zipsBatters.forEach(b => m.set(b.normalizedName || normalize(b.name), b))
-    return m
-  }, [zipsBatters])
-
-  const zipsPitByName = useMemo(() => {
-    const m = new Map<string, ZipsPitcher>()
-    zipsPitchers.forEach(p => m.set(p.normalizedName || normalize(p.name), p))
-    return m
-  }, [zipsPitchers])
+  const buildYearMaps = (bats: ZipsBatter[], pits: ZipsPitcher[]): ZipsYearMaps => {
+    const bat = new Map<string, ZipsBatter>()
+    bats.forEach(b => bat.set(b.normalizedName || normalize(b.name), b))
+    const pit = new Map<string, ZipsPitcher>()
+    pits.forEach(p => pit.set(p.normalizedName || normalize(p.name), p))
+    return { bat, pit }
+  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const zips26 = useMemo(() => buildYearMaps(zipsBatters, zipsPitchers), [zipsBatters, zipsPitchers])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const zips27 = useMemo(() => buildYearMaps(zips27Batters, zips27Pitchers), [zips27Batters, zips27Pitchers])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const zips28 = useMemo(() => buildYearMaps(zips28Batters, zips28Pitchers), [zips28Batters, zips28Pitchers])
 
   const playerByName = useMemo(() => {
     const m = new Map<string, Player>()
@@ -428,7 +432,7 @@ export default function DeadlinePage() {
           prospects</span>. Beyond the rentals, aging vets on near-term deals (through 2027–28, e.g. Freeman) are
           payroll-shedding candidates. Contract badges below are resolved live from salaries.csv, all.csv and
           fv_rankings.csv: a red badge means the target’s contract also expires in 2026 and is worthless to acquire.
-          3-yr outlook columns are ZiPS 2026 fantasy points normalized to a full season, then aged through 2028.
+          3-yr outlook columns are real FanGraphs ZiPS 2026 / 2027 / 2028 projections, normalized to full-season playing time.
         </p>
       </div>
 
@@ -519,7 +523,7 @@ export default function DeadlinePage() {
                     <td className="py-1.5 pr-3 text-right text-gray-600 dark:text-gray-300">{fmtSalary(entry.salary)}</td>
                     <td className="py-1.5 pr-3 text-gray-600 dark:text-gray-300 whitespace-nowrap">{entry.acquisitionDate || '—'}</td>
                     <td className="py-1.5 pr-3 text-xs">
-                      <OutlookCell o={threeYearOutlook(entry.playerName, player?.age ?? null, zipsBatByName, zipsPitByName)} />
+                      <OutlookCell o={threeYearOutlook(entry.playerName, zips26, zips27, zips28)} />
                     </td>
                     <td className="py-1.5 pr-3 whitespace-nowrap">
                       <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${inSeason ? 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200' : isYP ? 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200' : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200'}`}>
@@ -581,7 +585,7 @@ export default function DeadlinePage() {
                     <td className="py-1.5 pr-3 text-gray-600 dark:text-gray-300">{entry.contractEnds}</td>
                     <td className="py-1.5 pr-3 text-right text-gray-600 dark:text-gray-300">{isYP ? '—' : fmtSalary(committed)}</td>
                     <td className="py-1.5 pr-3 text-xs">
-                      <OutlookCell o={threeYearOutlook(entry.playerName, age, zipsBatByName, zipsPitByName)} />
+                      <OutlookCell o={threeYearOutlook(entry.playerName, zips26, zips27, zips28)} />
                     </td>
                     <td className="py-1.5 pr-3 whitespace-nowrap">
                       <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${verdict.cls}`}>{verdict.text}</span>
@@ -677,7 +681,7 @@ export default function DeadlinePage() {
                             {t.fv ? `FV ${t.fv.fv} · FG #${t.fv.rank}${t.fv.eta ? ` · ETA ${t.fv.eta}` : ''}` : '—'}
                           </td>
                           <td className="py-1.5 pr-3 text-xs">
-                            <OutlookCell o={threeYearOutlook(t.name, t.age, zipsBatByName, zipsPitByName)} />
+                            <OutlookCell o={threeYearOutlook(t.name, zips26, zips27, zips28)} />
                           </td>
                           <td className="py-1.5 pr-3 whitespace-nowrap">
                             <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${BADGE_CLS[t.badge.tone]}`}>{t.badge.text}</span>
@@ -706,10 +710,10 @@ export default function DeadlinePage() {
           Method: standings cells are Fantrax roto category points (rank-based), so margins within a category are not
           visible here — treat “gettable” categories as directional. Buyer/seller tiers, position needs and asks reflect
           the July 10, 2026 snapshot; contract badges re-resolve automatically whenever salaries.csv or all.csv are
-          refreshed on the Upload page. 3-yr outlook = ZiPS 2026 fantasy points normalized to a full season (FPTS/G × 150
-          for hitters, FPTS/IP × 175 for SP or × 65 for RP), aged with a simple curve: +3%/yr through age 25, flat 26–29,
-          −5%/yr at 30–32, −9%/yr at 33–35, −15%/yr at 36+. A rough decline model, not a real multi-year ZiPS — use for
-          trend, not precision.
+          refreshed on the Upload page. 3-yr outlook = real FanGraphs ZiPS projections for 2026, 2027 and 2028 (zips_2027_*.csv /
+          zips_2028_*.csv), each normalized to full-season playing time (FPTS/G × 150 for hitters, FPTS/IP × 175 for SP
+          or × 65 for RP) so the trend reflects projected skill rather than playing-time assumptions. “—” = not projected
+          that year.
         </p>
       </section>
     </div>

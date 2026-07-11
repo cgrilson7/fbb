@@ -68,6 +68,10 @@ interface PlayerStore {
   fvRankings: FVRanking[]
   prospectRankings: ProspectRanking[]
   standings: LeagueStanding[]
+  zips27Batters: ZipsBatter[]
+  zips27Pitchers: ZipsPitcher[]
+  zips28Batters: ZipsBatter[]
+  zips28Pitchers: ZipsPitcher[]
   fpRankings: FantasyProsRanking[]
   closers: CloserEntry[]
   closerMonkey: CloserMonkeyEntry[]
@@ -120,6 +124,10 @@ interface PlayerStore {
   setFVRankings: (rankings: FVRanking[]) => void
   setProspectRankings: (rankings: ProspectRanking[]) => void
   setStandings: (standings: LeagueStanding[]) => void
+  setZips27Batters: (batters: ZipsBatter[]) => void
+  setZips27Pitchers: (pitchers: ZipsPitcher[]) => void
+  setZips28Batters: (batters: ZipsBatter[]) => void
+  setZips28Pitchers: (pitchers: ZipsPitcher[]) => void
   setFPRankings: (rankings: FantasyProsRanking[]) => void
   setClosers: (closers: CloserEntry[]) => void
   setCloserMonkey: (entries: CloserMonkeyEntry[]) => void
@@ -172,6 +180,10 @@ export const usePlayerStore = create<PlayerStore>()(
       fvRankings: [],
       prospectRankings: [],
       standings: [],
+      zips27Batters: [],
+      zips27Pitchers: [],
+      zips28Batters: [],
+      zips28Pitchers: [],
       fpRankings: [],
       closers: [],
       closerMonkey: [],
@@ -207,6 +219,10 @@ export const usePlayerStore = create<PlayerStore>()(
       setFVRankings: (rankings) => set({ fvRankings: rankings }),
       setProspectRankings: (rankings) => set({ prospectRankings: rankings }),
       setStandings: (standings) => set({ standings }),
+      setZips27Batters: (batters) => set({ zips27Batters: batters }),
+      setZips27Pitchers: (pitchers) => set({ zips27Pitchers: pitchers }),
+      setZips28Batters: (batters) => set({ zips28Batters: batters }),
+      setZips28Pitchers: (pitchers) => set({ zips28Pitchers: pitchers }),
       setFPRankings: (rankings) => set({ fpRankings: rankings }),
       setClosers: (closers) => set({ closers }),
       setCloserMonkey: (entries) => set({ closerMonkey: entries }),
@@ -537,6 +553,10 @@ export const usePlayerStore = create<PlayerStore>()(
         fvRankings: state.fvRankings,
         prospectRankings: state.prospectRankings,
         standings: state.standings,
+        zips27Batters: state.zips27Batters,
+        zips27Pitchers: state.zips27Pitchers,
+        zips28Batters: state.zips28Batters,
+        zips28Pitchers: state.zips28Pitchers,
         fpRankings: state.fpRankings,
         closers: state.closers,
         closerMonkey: state.closerMonkey,

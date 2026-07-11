@@ -25,6 +25,10 @@ const fileTypes: { type: FileType; label: string; description: string }[] = [
   { type: 'fvRankings', label: 'fv_rankings.csv', description: 'FanGraphs Future Value rankings' },
   { type: 'prospectRankings', label: 'prospect_rankings.csv', description: 'MLB Pipeline & Keith Law Top 100 + ETA' },
   { type: 'standings', label: 'standings.csv', description: 'Fantrax roto standings (category point totals)' },
+  { type: 'zips27Batters', label: 'zips_2027_batters.csv', description: 'ZiPS 2027 batter projections' },
+  { type: 'zips27Pitchers', label: 'zips_2027_pitchers.csv', description: 'ZiPS 2027 pitcher projections' },
+  { type: 'zips28Batters', label: 'zips_2028_batters.csv', description: 'ZiPS 2028 batter projections' },
+  { type: 'zips28Pitchers', label: 'zips_2028_pitchers.csv', description: 'ZiPS 2028 pitcher projections' },
   { type: 'fpRankings', label: 'fantasypros_dynasty_rankings.csv', description: 'FantasyPros dynasty rankings' },
   { type: 'closers', label: 'closers.csv', description: 'Closer depth charts (closermonkey.com)' },
   { type: 'fgMinorsBatters', label: 'fangraphs_minors_batters.csv', description: 'FanGraphs MiLB batting stats' },
@@ -48,6 +52,10 @@ const storeKeyMap: Record<FileType, string> = {
   fvRankings: 'fvRankings',
   prospectRankings: 'prospectRankings',
   standings: 'standings',
+  zips27Batters: 'zips27Batters',
+  zips27Pitchers: 'zips27Pitchers',
+  zips28Batters: 'zips28Batters',
+  zips28Pitchers: 'zips28Pitchers',
   fpRankings: 'fpRankings',
   closers: 'closers',
   closermonkey: 'closerMonkey',
@@ -72,6 +80,10 @@ export default function UploadPage() {
     fvRankings: { type: 'fvRankings', status: 'pending' },
     prospectRankings: { type: 'prospectRankings', status: 'pending' },
     standings: { type: 'standings', status: 'pending' },
+    zips27Batters: { type: 'zips27Batters', status: 'pending' },
+    zips27Pitchers: { type: 'zips27Pitchers', status: 'pending' },
+    zips28Batters: { type: 'zips28Batters', status: 'pending' },
+    zips28Pitchers: { type: 'zips28Pitchers', status: 'pending' },
     fpRankings: { type: 'fpRankings', status: 'pending' },
     closers: { type: 'closers', status: 'pending' },
     closermonkey: { type: 'closermonkey', status: 'pending' },
@@ -80,7 +92,7 @@ export default function UploadPage() {
   })
 
   const store = usePlayerStore()
-  const { setPlayers, setHKB, setSalaries, setBattingProspects, setPitchingProspects, setZipsBatters, setZipsPitchers, setZipsDcBatters, setZipsDcPitchers, setZipsRosBatters, setZipsRosPitchers, setFreeAgentEntries, setFVRankings, setProspectRankings, setStandings, setFPRankings, setClosers, setCloserMonkey, joinData } = store
+  const { setPlayers, setHKB, setSalaries, setBattingProspects, setPitchingProspects, setZipsBatters, setZipsPitchers, setZipsDcBatters, setZipsDcPitchers, setZipsRosBatters, setZipsRosPitchers, setFreeAgentEntries, setFVRankings, setProspectRankings, setStandings, setZips27Batters, setZips27Pitchers, setZips28Batters, setZips28Pitchers, setFPRankings, setClosers, setCloserMonkey, joinData } = store
   const hasHydrated = useHydration()
 
   const [isJoining, setIsJoining] = useState(false)
@@ -186,6 +198,18 @@ export default function UploadPage() {
             break
           case 'standings':
             setStandings(data)
+            break
+          case 'zips27Batters':
+            setZips27Batters(data)
+            break
+          case 'zips27Pitchers':
+            setZips27Pitchers(data)
+            break
+          case 'zips28Batters':
+            setZips28Batters(data)
+            break
+          case 'zips28Pitchers':
+            setZips28Pitchers(data)
             break
           case 'fpRankings':
             setFPRankings(data)

@@ -19,7 +19,7 @@ import type {
   LeagueStanding
 } from '@/types'
 
-export type FileType = 'players' | 'hkb' | 'salaries' | 'battingProspects' | 'pitchingProspects' | 'zipsBatters' | 'zipsPitchers' | 'zipsDcBatters' | 'zipsDcPitchers' | 'zipsRosBatters' | 'zipsRosPitchers' | 'freeAgency' | 'fvRankings' | 'fpRankings' | 'closers' | 'closermonkey' | 'fgMinorsBatters' | 'fgMinorsPitchers' | 'prospectRankings' | 'standings'
+export type FileType = 'players' | 'hkb' | 'salaries' | 'battingProspects' | 'pitchingProspects' | 'zipsBatters' | 'zipsPitchers' | 'zipsDcBatters' | 'zipsDcPitchers' | 'zipsRosBatters' | 'zipsRosPitchers' | 'freeAgency' | 'fvRankings' | 'fpRankings' | 'closers' | 'closermonkey' | 'fgMinorsBatters' | 'fgMinorsPitchers' | 'prospectRankings' | 'standings' | 'zips27Batters' | 'zips27Pitchers' | 'zips28Batters' | 'zips28Pitchers'
 
 export function detectFileType(filename: string): FileType | null {
   const lower = filename.toLowerCase()
@@ -45,6 +45,10 @@ export function detectFileType(filename: string): FileType | null {
   // ZiPS projections (check DC before regular)
   if (lower.includes('zips') && lower.includes('dc') && lower.includes('batter')) return 'zipsDcBatters'
   if (lower.includes('zips') && lower.includes('dc') && lower.includes('pitcher')) return 'zipsDcPitchers'
+  if (lower.includes('zips') && lower.includes('2027') && lower.includes('batter')) return 'zips27Batters'
+  if (lower.includes('zips') && lower.includes('2027') && lower.includes('pitcher')) return 'zips27Pitchers'
+  if (lower.includes('zips') && lower.includes('2028') && lower.includes('batter')) return 'zips28Batters'
+  if (lower.includes('zips') && lower.includes('2028') && lower.includes('pitcher')) return 'zips28Pitchers'
   if (lower.includes('zips') && lower.includes('batter')) return 'zipsBatters'
   if (lower.includes('zips') && lower.includes('pitcher')) return 'zipsPitchers'
   // Check "all" last since it's a common substring
@@ -109,6 +113,12 @@ function transformData(rows: Record<string, string>[], type: FileType): unknown[
       return rows.filter(row => (row['Name'] || '').trim() !== '').map(transformProspectRanking)
     case 'standings':
       return rows.filter(row => (row['Team'] || '').trim() !== '').map(transformStanding)
+    case 'zips27Batters':
+    case 'zips28Batters':
+      return rows.map(transformZipsBatter)
+    case 'zips27Pitchers':
+    case 'zips28Pitchers':
+      return rows.map(transformZipsPitcher)
     case 'fpRankings':
       return rows.filter(row => (row['PLAYER NAME'] || row['Player Name'] || '').trim() !== '').map(transformFPRanking)
     case 'closers':
@@ -558,6 +568,10 @@ const DEFAULT_DATA_MANIFEST: { url: string; type: FileType }[] = [
   { url: '/data/fv_rankings.csv', type: 'fvRankings' },
   { url: '/data/prospect_rankings.csv', type: 'prospectRankings' },
   { url: '/data/standings.csv', type: 'standings' },
+  { url: '/data/zips_2027_batters.csv', type: 'zips27Batters' },
+  { url: '/data/zips_2027_pitchers.csv', type: 'zips27Pitchers' },
+  { url: '/data/zips_2028_batters.csv', type: 'zips28Batters' },
+  { url: '/data/zips_2028_pitchers.csv', type: 'zips28Pitchers' },
   { url: '/data/fantasypros_dynasty_rankings.csv', type: 'fpRankings' },
   { url: '/data/closers.csv', type: 'closers' },
   { url: '/data/closermonkey.csv', type: 'closermonkey' },
@@ -589,6 +603,10 @@ export async function fetchAndLoadDefaults(
     fvRankings: 'fvRankings',
     prospectRankings: 'prospectRankings',
     standings: 'standings',
+    zips27Batters: 'zips27Batters',
+    zips27Pitchers: 'zips27Pitchers',
+    zips28Batters: 'zips28Batters',
+    zips28Pitchers: 'zips28Pitchers',
     fpRankings: 'fpRankings',
     closers: 'closers',
     closermonkey: 'closerMonkey',
@@ -612,6 +630,10 @@ export async function fetchAndLoadDefaults(
     fvRankings: 'setFVRankings',
     prospectRankings: 'setProspectRankings',
     standings: 'setStandings',
+    zips27Batters: 'setZips27Batters',
+    zips27Pitchers: 'setZips27Pitchers',
+    zips28Batters: 'setZips28Batters',
+    zips28Pitchers: 'setZips28Pitchers',
     fpRankings: 'setFPRankings',
     closers: 'setClosers',
     closermonkey: 'setCloserMonkey',
