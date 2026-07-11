@@ -121,7 +121,7 @@ const BUYER_PLANS: BuyerPlan[] = [
     rationale:
       'Offense is nearly maxed out (12s and 13s across the board), so all their upside is pitching: HLD 6.5, SV 8, K 8. They want ratio-safe relief that will not dent an ERA of 13 — exactly what our expiring arms are.',
     positionNeeds: 'Setup corps behind Hader/Weaver; catcher (only an aging Salvador Pérez); CF depth.',
-    send: 'Sewald + Kerkering (or Ginkel)',
+    send: 'Sewald + Kerkering',
     targets: [
       { name: 'Cam Smith', note: 'The ask — their other young MLB bats (Carter, Winn) proved to be expiring' },
       { name: 'Jonah Tong', note: 'Farm arm, ETA now' },
@@ -167,7 +167,6 @@ const BUYER_PLANS: BuyerPlan[] = [
     targets: [
       { name: 'Kyson Witherspoon', note: 'Farm arm' },
       { name: 'Jurrangelo Cijntje', note: 'Farm arm' },
-      { name: 'Trey Gibson', note: 'Farm arm' },
       { name: 'Alfredo Duno', note: 'Farm C, if he bites hard' },
     ],
   },
