@@ -196,24 +196,39 @@ interface ResolvedTarget {
 
 // ------------------------------------------------------------
 // 3-year outlook: real FanGraphs ZiPS projections for 2026, 2027
-// and 2028, each normalized to a full season of playing time
-// (FPTS/G × 150 for hitters; FPTS/IP × 175 for SP, × 65 for RP)
-// so the trend reflects projected skill, not playing-time noise.
+// and 2028. Batters show wRC+ straight from ZiPS. Pitchers show
+// ERA+ computed against that projection year's league-average
+// ERA (IP-weighted across the file), since the export carries
+// no xFIP/ERA+ column. Both: 100 = average, higher = better.
 // ------------------------------------------------------------
 interface ZipsYearMaps {
   bat: Map<string, ZipsBatter>
   pit: Map<string, ZipsPitcher>
+  leagueEra: number
 }
 
-function seasonRate(maps: ZipsYearMaps, key: string): number | null {
+function leagueEraOf(pitchers: ZipsPitcher[]): number {
+  let er = 0
+  let ip = 0
+  for (const p of pitchers) {
+    if (p.ip > 0) {
+      er += p.er
+      ip += p.ip
+    }
+  }
+  return ip > 0 ? (er / ip) * 9 : 4.2
+}
+
+function yearValue(maps: ZipsYearMaps, key: string): number | null {
   const bat = maps.bat.get(key)
-  if (bat && bat.fptsPerG > 0) return bat.fptsPerG * 150
+  if (bat && bat.wrcPlus > 0 && bat.pa >= 50) return Math.round(bat.wrcPlus)
   const pit = maps.pit.get(key)
-  if (pit && pit.fptsPerIP > 0) return pit.fptsPerIP * (pit.gs > 5 ? 175 : 65)
+  if (pit && pit.era > 0 && pit.ip >= 20) return Math.round((maps.leagueEra / pit.era) * 100)
   return null
 }
 
 interface ThreeYear {
+  metric: 'wRC+' | 'ERA+'
   y26: number | null
   y27: number | null
   y28: number | null
@@ -221,27 +236,28 @@ interface ThreeYear {
 
 function threeYearOutlook(name: string, y26m: ZipsYearMaps, y27m: ZipsYearMaps, y28m: ZipsYearMaps): ThreeYear | null {
   const key = normalize(name)
-  const y26 = seasonRate(y26m, key)
-  const y27 = seasonRate(y27m, key)
-  const y28 = seasonRate(y28m, key)
+  const y26 = yearValue(y26m, key)
+  const y27 = yearValue(y27m, key)
+  const y28 = yearValue(y28m, key)
   if (y26 === null && y27 === null && y28 === null) return null
-  const r = (v: number | null) => (v === null ? null : Math.round(v))
-  return { y26: r(y26), y27: r(y27), y28: r(y28) }
+  const isBat = y26m.bat.has(key) || y27m.bat.has(key) || y28m.bat.has(key)
+  return { metric: isBat ? 'wRC+' : 'ERA+', y26, y27, y28 }
 }
 
 function OutlookCell({ o }: { o: ThreeYear | null }) {
   if (!o) return <span className="text-gray-400">—</span>
-  const pct28 = o.y26 && o.y28 ? o.y28 / o.y26 : null
+  const delta = o.y26 !== null && o.y28 !== null ? o.y28 - o.y26 : null
   const cls =
-    pct28 !== null && pct28 < 0.8
+    delta !== null && delta <= -10
       ? 'text-red-600 dark:text-red-400'
-      : pct28 !== null && pct28 > 1.05
+      : delta !== null && delta >= 5
         ? 'text-green-600 dark:text-green-400'
         : 'text-gray-600 dark:text-gray-300'
   const f = (v: number | null) => (v === null ? '—' : v)
   return (
     <span className={`whitespace-nowrap ${cls}`}>
       {f(o.y26)} → {f(o.y27)} → {f(o.y28)}
+      <span className="ml-1 text-[10px] text-gray-400 dark:text-gray-500">{o.metric}</span>
     </span>
   )
 }
@@ -325,7 +341,7 @@ export default function DeadlinePage() {
     bats.forEach(b => bat.set(b.normalizedName || normalize(b.name), b))
     const pit = new Map<string, ZipsPitcher>()
     pits.forEach(p => pit.set(p.normalizedName || normalize(p.name), p))
-    return { bat, pit }
+    return { bat, pit, leagueEra: leagueEraOf(pits) }
   }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const zips26 = useMemo(() => buildYearMaps(zipsBatters, zipsPitchers), [zipsBatters, zipsPitchers])
@@ -432,7 +448,7 @@ export default function DeadlinePage() {
           prospects</span>. Beyond the rentals, aging vets on near-term deals (through 2027–28, e.g. Freeman) are
           payroll-shedding candidates. Contract badges below are resolved live from salaries.csv, all.csv and
           fv_rankings.csv: a red badge means the target’s contract also expires in 2026 and is worthless to acquire.
-          3-yr outlook columns are real FanGraphs ZiPS 2026 / 2027 / 2028 projections, normalized to full-season playing time.
+          3-yr outlook columns are real FanGraphs ZiPS 2026 / 2027 / 2028 projections: wRC+ for hitters, ERA+ for pitchers (100 = league average, higher is better for both).
         </p>
       </div>
 
@@ -505,7 +521,7 @@ export default function DeadlinePage() {
                 <th className="py-1 pr-3 text-right">Rank</th>
                 <th className="py-1 pr-3 text-right">Salary</th>
                 <th className="py-1 pr-3">Acquired</th>
-                <th className="py-1 pr-3">3-yr outlook ’26→’28</th>
+                <th className="py-1 pr-3">3-yr wRC+ / ERA+ ’26→’28</th>
                 <th className="py-1 pr-3">Status</th>
               </tr>
             </thead>
@@ -558,7 +574,7 @@ export default function DeadlinePage() {
                 <th className="py-1 pr-3 text-right">$/yr</th>
                 <th className="py-1 pr-3">Thru</th>
                 <th className="py-1 pr-3 text-right">Committed</th>
-                <th className="py-1 pr-3">3-yr outlook ’26→’28</th>
+                <th className="py-1 pr-3">3-yr wRC+ / ERA+ ’26→’28</th>
                 <th className="py-1 pr-3">Verdict</th>
               </tr>
             </thead>
@@ -665,7 +681,7 @@ export default function DeadlinePage() {
                         <th className="py-1 pr-3 text-right">Age</th>
                         <th className="py-1 pr-3 text-right">Rank</th>
                         <th className="py-1 pr-3">Prospect</th>
-                        <th className="py-1 pr-3">3-yr outlook ’26→’28</th>
+                        <th className="py-1 pr-3">3-yr wRC+ / ERA+ ’26→’28</th>
                         <th className="py-1 pr-3">Contract</th>
                         <th className="py-1 pr-3">Note</th>
                       </tr>
@@ -711,9 +727,9 @@ export default function DeadlinePage() {
           visible here — treat “gettable” categories as directional. Buyer/seller tiers, position needs and asks reflect
           the July 10, 2026 snapshot; contract badges re-resolve automatically whenever salaries.csv or all.csv are
           refreshed on the Upload page. 3-yr outlook = real FanGraphs ZiPS projections for 2026, 2027 and 2028 (zips_2027_*.csv /
-          zips_2028_*.csv), each normalized to full-season playing time (FPTS/G × 150 for hitters, FPTS/IP × 175 for SP
-          or × 65 for RP) so the trend reflects projected skill rather than playing-time assumptions. “—” = not projected
-          that year.
+          zips_2028_*.csv). Hitters: ZiPS wRC+ (min 50 PA). Pitchers: ERA+ = that projection year’s IP-weighted
+          league-average ERA ÷ player ERA × 100 (min 20 IP) — the ZiPS export has no xFIP column, so ERA+ is computed
+          in-house. Both metrics: 100 = league average, higher = better. “—” = not projected that year.
         </p>
       </section>
     </div>
