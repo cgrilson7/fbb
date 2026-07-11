@@ -173,7 +173,7 @@ Next.js React app for dynasty league management. Run with `cd app && npm run dev
 - **Salaries**: Year-by-year salary breakdown, expiring contracts, franchise comparison
 - **Match**: Manual reconciliation for unmatched player names
 - **Franchises**: Edit status code → franchise name mappings
-- **Deadline**: Trade deadline plan — real standings heatmap (from `standings.csv`, Fantrax roto point totals), expiring-contract sell list, payroll-shed candidates (2027–28 deals, aging verdicts), per-buyer deal sheets with live contract-status badges, and aged 3-yr ZiPS outlooks on every table
+- **Deadline**: Trade deadline plan — real standings heatmap (from `standings.csv`, Fantrax roto point totals), expiring-contract sell list, payroll-shed candidates (2027–28 deals, aging verdicts), per-buyer deal sheets with live contract-status badges, and real ZiPS 2026–28 3-yr outlooks on every table (`zips_2027_*.csv`, `zips_2028_*.csv`)
 
 ### Franchise identity mapping (verified July 2026)
 Fantrax standings team names ↔ all.csv status codes ↔ salaries.csv owner names:
