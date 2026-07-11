@@ -173,6 +173,14 @@ Next.js React app for dynasty league management. Run with `cd app && npm run dev
 - **Salaries**: Year-by-year salary breakdown, expiring contracts, franchise comparison
 - **Match**: Manual reconciliation for unmatched player names
 - **Franchises**: Edit status code → franchise name mappings
+- **Deadline**: Trade deadline plan — real standings heatmap (from `standings.csv`, Fantrax roto point totals), our expiring-contract sell list, and per-buyer deal sheets with live contract-status badges on targets
+
+### Franchise identity mapping (verified July 2026)
+Fantrax standings team names ↔ all.csv status codes ↔ salaries.csv owner names:
+Bionic Big Boys=B&A=Ben Brody & Aaron; J.D. Barnett=JD; Ellygal Immigrants=ELLY=Dustin Hart & Max Wamp;
+Tyler=T; Zack=Zack; Steve Cornish=Steve; Ross & Jack=R&J; Colin & Greg=C&G;
+E.T. Phone Holmes=J&A=Jake Zuckman & Andrew Meyers; Max Mastbaum & co=Max="Max, Jake & Sam";
+Kai/Brian/Brenden/Ethan as named. (ELLY/Max owners were previously crossed in store defaults.)
 
 ### Data Files
 - `all.csv`: Base player universe from Fantrax (~10K players)

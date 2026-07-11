@@ -23,6 +23,8 @@ const fileTypes: { type: FileType; label: string; description: string }[] = [
   { type: 'zipsPitchers', label: 'zips_pitchers.csv', description: 'ZiPS pitcher projections' },
   { type: 'freeAgency', label: 'free_agency.csv', description: 'Free agent auction tracker' },
   { type: 'fvRankings', label: 'fv_rankings.csv', description: 'FanGraphs Future Value rankings' },
+  { type: 'prospectRankings', label: 'prospect_rankings.csv', description: 'MLB Pipeline & Keith Law Top 100 + ETA' },
+  { type: 'standings', label: 'standings.csv', description: 'Fantrax roto standings (category point totals)' },
   { type: 'fpRankings', label: 'fantasypros_dynasty_rankings.csv', description: 'FantasyPros dynasty rankings' },
   { type: 'closers', label: 'closers.csv', description: 'Closer depth charts (closermonkey.com)' },
   { type: 'fgMinorsBatters', label: 'fangraphs_minors_batters.csv', description: 'FanGraphs MiLB batting stats' },
@@ -44,6 +46,8 @@ const storeKeyMap: Record<FileType, string> = {
   zipsRosPitchers: 'zipsRosPitchers',
   freeAgency: 'freeAgentEntries',
   fvRankings: 'fvRankings',
+  prospectRankings: 'prospectRankings',
+  standings: 'standings',
   fpRankings: 'fpRankings',
   closers: 'closers',
   closermonkey: 'closerMonkey',
@@ -66,6 +70,8 @@ export default function UploadPage() {
     zipsRosPitchers: { type: 'zipsRosPitchers', status: 'pending' },
     freeAgency: { type: 'freeAgency', status: 'pending' },
     fvRankings: { type: 'fvRankings', status: 'pending' },
+    prospectRankings: { type: 'prospectRankings', status: 'pending' },
+    standings: { type: 'standings', status: 'pending' },
     fpRankings: { type: 'fpRankings', status: 'pending' },
     closers: { type: 'closers', status: 'pending' },
     closermonkey: { type: 'closermonkey', status: 'pending' },
@@ -74,7 +80,7 @@ export default function UploadPage() {
   })
 
   const store = usePlayerStore()
-  const { setPlayers, setHKB, setSalaries, setBattingProspects, setPitchingProspects, setZipsBatters, setZipsPitchers, setZipsDcBatters, setZipsDcPitchers, setZipsRosBatters, setZipsRosPitchers, setFreeAgentEntries, setFVRankings, setFPRankings, setClosers, setCloserMonkey, joinData } = store
+  const { setPlayers, setHKB, setSalaries, setBattingProspects, setPitchingProspects, setZipsBatters, setZipsPitchers, setZipsDcBatters, setZipsDcPitchers, setZipsRosBatters, setZipsRosPitchers, setFreeAgentEntries, setFVRankings, setProspectRankings, setStandings, setFPRankings, setClosers, setCloserMonkey, joinData } = store
   const hasHydrated = useHydration()
 
   const [isJoining, setIsJoining] = useState(false)
@@ -174,6 +180,12 @@ export default function UploadPage() {
             break
           case 'fvRankings':
             setFVRankings(data)
+            break
+          case 'prospectRankings':
+            setProspectRankings(data)
+            break
+          case 'standings':
+            setStandings(data)
             break
           case 'fpRankings':
             setFPRankings(data)

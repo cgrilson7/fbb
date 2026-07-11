@@ -249,6 +249,27 @@ export interface ZipsPitcher {
   normalizedName: string
 }
 
+export interface ProspectRanking {
+  name: string
+  team: string
+  position: string
+  mlbRank: number | null          // MLB Pipeline Top 100 current rank
+  mlbPreseasonRank: number | null // MLB Pipeline rank at start of season (for movement)
+  klawRank: number | null         // Keith Law Top 100
+  eta: number | null              // Projected MLB debut year (MLB Pipeline ETA)
+  normalizedName: string
+}
+
+export interface LeagueStanding {
+  rank: number
+  team: string
+  points: number
+  recentDelta: number   // +/- over recent period
+  gamesPlayed: number
+  // Roto points per category (PA is informational only — not a scored category)
+  categoryPoints: Record<string, number | null>
+}
+
 export interface FVRanking {
   rank: number
   name: string

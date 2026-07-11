@@ -20,7 +20,9 @@ import type {
   CloserEntry,
   CloserMonkeyEntry,
   FGMinorsBatter,
-  FGMinorsPitcher
+  FGMinorsPitcher,
+  ProspectRanking,
+  LeagueStanding
 } from '@/types'
 import { normalize } from './normalize'
 import { idbStorage } from './idb-storage'
@@ -32,7 +34,9 @@ const DEFAULT_FRANCHISE_MAPPINGS: FranchiseMapping[] = [
   { shortCode: 'R&J', fullName: 'Ross & Jack Kantor', confirmed: true },
   { shortCode: 'J&A', fullName: 'Jake Zuckman & Andrew Meyers', confirmed: true },
   { shortCode: 'T', fullName: 'Tyler Hart', confirmed: true },
-  { shortCode: 'Max', fullName: 'Dustin Hart & Max Wamp', confirmed: true },
+  // Verified vs salaries.csv/free_agency.csv: "Max" rosters Sale/Devers/Rooker (the
+  // Mastbaum group's players) and "ELLY" rosters Elly De La Cruz/PCA (Dustin & Wamp's)
+  { shortCode: 'Max', fullName: 'Max Mastbaum, Jake Mastbaum & Sam Elias', confirmed: true },
   { shortCode: 'Kai', fullName: 'Kai Nelson', confirmed: true },
   { shortCode: 'Ethan', fullName: 'Ethan Gobetz', confirmed: true },
   { shortCode: 'Steve', fullName: 'Steve Cornish', confirmed: true },
@@ -40,7 +44,7 @@ const DEFAULT_FRANCHISE_MAPPINGS: FranchiseMapping[] = [
   { shortCode: 'JD', fullName: 'JD Barnett', confirmed: true },
   { shortCode: 'Brian', fullName: 'Brian Frederick', confirmed: true },
   { shortCode: 'Brenden', fullName: 'Brenden Freedman', confirmed: true },
-  { shortCode: 'ELLY', fullName: 'Max Mastbaum, Jake Mastbaum & Sam Elias', confirmed: true },
+  { shortCode: 'ELLY', fullName: 'Dustin Hart & Max Wamp', confirmed: true },
   { shortCode: 'FA', fullName: 'Free Agent', confirmed: true },
 ]
 
@@ -62,6 +66,8 @@ interface PlayerStore {
   zipsRosPitchers: ZipsPitcher[]
   freeAgentEntries: FreeAgentEntry[]
   fvRankings: FVRanking[]
+  prospectRankings: ProspectRanking[]
+  standings: LeagueStanding[]
   fpRankings: FantasyProsRanking[]
   closers: CloserEntry[]
   closerMonkey: CloserMonkeyEntry[]
@@ -112,6 +118,8 @@ interface PlayerStore {
   setZipsRosPitchers: (pitchers: ZipsPitcher[]) => void
   setFreeAgentEntries: (entries: FreeAgentEntry[]) => void
   setFVRankings: (rankings: FVRanking[]) => void
+  setProspectRankings: (rankings: ProspectRanking[]) => void
+  setStandings: (standings: LeagueStanding[]) => void
   setFPRankings: (rankings: FantasyProsRanking[]) => void
   setClosers: (closers: CloserEntry[]) => void
   setCloserMonkey: (entries: CloserMonkeyEntry[]) => void
@@ -162,6 +170,8 @@ export const usePlayerStore = create<PlayerStore>()(
       zipsRosPitchers: [],
       freeAgentEntries: [],
       fvRankings: [],
+      prospectRankings: [],
+      standings: [],
       fpRankings: [],
       closers: [],
       closerMonkey: [],
@@ -195,6 +205,8 @@ export const usePlayerStore = create<PlayerStore>()(
       setZipsRosPitchers: (pitchers) => set({ zipsRosPitchers: pitchers }),
       setFreeAgentEntries: (entries) => set({ freeAgentEntries: entries }),
       setFVRankings: (rankings) => set({ fvRankings: rankings }),
+      setProspectRankings: (rankings) => set({ prospectRankings: rankings }),
+      setStandings: (standings) => set({ standings }),
       setFPRankings: (rankings) => set({ fpRankings: rankings }),
       setClosers: (closers) => set({ closers }),
       setCloserMonkey: (entries) => set({ closerMonkey: entries }),
@@ -523,6 +535,8 @@ export const usePlayerStore = create<PlayerStore>()(
         zipsRosPitchers: state.zipsRosPitchers,
         freeAgentEntries: state.freeAgentEntries,
         fvRankings: state.fvRankings,
+        prospectRankings: state.prospectRankings,
+        standings: state.standings,
         fpRankings: state.fpRankings,
         closers: state.closers,
         closerMonkey: state.closerMonkey,

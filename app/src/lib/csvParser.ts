@@ -14,10 +14,12 @@ import type {
   CloserEntry,
   CloserMonkeyEntry,
   FGMinorsBatter,
-  FGMinorsPitcher
+  FGMinorsPitcher,
+  ProspectRanking,
+  LeagueStanding
 } from '@/types'
 
-export type FileType = 'players' | 'hkb' | 'salaries' | 'battingProspects' | 'pitchingProspects' | 'zipsBatters' | 'zipsPitchers' | 'zipsDcBatters' | 'zipsDcPitchers' | 'zipsRosBatters' | 'zipsRosPitchers' | 'freeAgency' | 'fvRankings' | 'fpRankings' | 'closers' | 'closermonkey' | 'fgMinorsBatters' | 'fgMinorsPitchers'
+export type FileType = 'players' | 'hkb' | 'salaries' | 'battingProspects' | 'pitchingProspects' | 'zipsBatters' | 'zipsPitchers' | 'zipsDcBatters' | 'zipsDcPitchers' | 'zipsRosBatters' | 'zipsRosPitchers' | 'freeAgency' | 'fvRankings' | 'fpRankings' | 'closers' | 'closermonkey' | 'fgMinorsBatters' | 'fgMinorsPitchers' | 'prospectRankings' | 'standings'
 
 export function detectFileType(filename: string): FileType | null {
   const lower = filename.toLowerCase()
@@ -28,6 +30,9 @@ export function detectFileType(filename: string): FileType | null {
   if (lower.includes('closer')) return 'closers'
   if (lower.includes('fantasypros')) return 'fpRankings'
   if (lower.includes('fv') && lower.includes('rank')) return 'fvRankings'
+  // Check before batting/pitching prospects — "prospect_rankings" contains "prospect"
+  if (lower.includes('prospect') && lower.includes('rank')) return 'prospectRankings'
+  if (lower.includes('standing')) return 'standings'
   if (lower.includes('free') && lower.includes('agen')) return 'freeAgency'
   if (lower.includes('fangraphs') && lower.includes('minors') && lower.includes('batter')) return 'fgMinorsBatters'
   if (lower.includes('fangraphs') && lower.includes('minors') && lower.includes('pitcher')) return 'fgMinorsPitchers'
@@ -100,6 +105,10 @@ function transformData(rows: Record<string, string>[], type: FileType): unknown[
       return rows.map(transformFreeAgency)
     case 'fvRankings':
       return rows.map(transformFVRanking)
+    case 'prospectRankings':
+      return rows.filter(row => (row['Name'] || '').trim() !== '').map(transformProspectRanking)
+    case 'standings':
+      return rows.filter(row => (row['Team'] || '').trim() !== '').map(transformStanding)
     case 'fpRankings':
       return rows.filter(row => (row['PLAYER NAME'] || row['Player Name'] || '').trim() !== '').map(transformFPRanking)
     case 'closers':
@@ -379,6 +388,43 @@ function transformFVRanking(row: Record<string, string>): FVRanking {
   }
 }
 
+function transformProspectRanking(row: Record<string, string>): ProspectRanking {
+  const name = row['Name'] || ''
+  return {
+    name,
+    team: row['Team'] || '',
+    position: row['Position'] || row['Pos'] || '',
+    mlbRank: parseNumber(row['MLB Rank']),
+    mlbPreseasonRank: parseNumber(row['MLB Preseason Rank']),
+    klawRank: parseNumber(row['KLaw Rank']),
+    eta: parseNumber(row['ETA']),
+    normalizedName: normalize(name)
+  }
+}
+
+// Fantrax "Standings - Point Totals" export. Category columns hold roto points
+// (1..N teams), not raw stat values. AB/H/IP are unscored and left blank.
+const STANDINGS_CAT_COLUMNS = ['PA', 'R', 'HR', 'RBI', 'SB', 'AVG', 'OBP', 'SLG', 'ERA', 'K', 'SV', 'HLD', 'QS', 'BB/9', 'H/IP']
+
+function transformStanding(row: Record<string, string>): LeagueStanding {
+  const num = (v: string | undefined): number | null => {
+    const n = parseFloat((v || '').replace(/,/g, '').trim())
+    return isNaN(n) ? null : n
+  }
+  const categoryPoints: Record<string, number | null> = {}
+  for (const cat of STANDINGS_CAT_COLUMNS) {
+    categoryPoints[cat] = num(row[cat])
+  }
+  return {
+    rank: num(row['Rank']) ?? 0,
+    team: (row['Team'] || '').trim(),
+    points: num(row['Pts']) ?? 0,
+    recentDelta: num(row['+/-']) ?? 0,
+    gamesPlayed: num(row['GP']) ?? 0,
+    categoryPoints
+  }
+}
+
 function transformFPRanking(row: Record<string, string>): FantasyProsRanking {
   const name = row['PLAYER NAME'] || row['Player Name'] || ''
   const rawPos = row['POS'] || row['Pos'] || ''
@@ -510,6 +556,8 @@ const DEFAULT_DATA_MANIFEST: { url: string; type: FileType }[] = [
   { url: '/data/zips_dc_ros_advanced_pitchers.csv', type: 'zipsRosPitchers' },
   { url: '/data/free_agency.csv', type: 'freeAgency' },
   { url: '/data/fv_rankings.csv', type: 'fvRankings' },
+  { url: '/data/prospect_rankings.csv', type: 'prospectRankings' },
+  { url: '/data/standings.csv', type: 'standings' },
   { url: '/data/fantasypros_dynasty_rankings.csv', type: 'fpRankings' },
   { url: '/data/closers.csv', type: 'closers' },
   { url: '/data/closermonkey.csv', type: 'closermonkey' },
@@ -539,6 +587,8 @@ export async function fetchAndLoadDefaults(
     zipsRosPitchers: 'zipsRosPitchers',
     freeAgency: 'freeAgentEntries',
     fvRankings: 'fvRankings',
+    prospectRankings: 'prospectRankings',
+    standings: 'standings',
     fpRankings: 'fpRankings',
     closers: 'closers',
     closermonkey: 'closerMonkey',
@@ -560,6 +610,8 @@ export async function fetchAndLoadDefaults(
     zipsRosPitchers: 'setZipsRosPitchers',
     freeAgency: 'setFreeAgentEntries',
     fvRankings: 'setFVRankings',
+    prospectRankings: 'setProspectRankings',
+    standings: 'setStandings',
     fpRankings: 'setFPRankings',
     closers: 'setClosers',
     closermonkey: 'setCloserMonkey',

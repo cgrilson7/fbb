@@ -7,6 +7,7 @@ import { Search, ChevronUp, ChevronDown, X, Loader2 } from 'lucide-react'
 
 type ProspectType = 'all' | 'batting' | 'pitching'
 type SortField = 'name' | 'team' | 'level' | 'age' | 'hkbRank' | 'hkbValue' | 'fvGrade' | 'fvRank' |
+  'mlbRank' | 'klawRank' | 'eta' | 'rankTrend' |
   'pa' | 'avg' | 'obp' | 'slg' | 'ops' | 'iso' | 'wrcPlus' | 'bbPct' | 'kPct' |
   'ip' | 'era' | 'fip' | 'xfip' | 'whip' | 'k9' | 'bb9' | 'kMinusBbPct' | 'franchise'
 type SortOrder = 'asc' | 'desc'
@@ -37,7 +38,7 @@ function topLevel(level: string): string {
 }
 
 export default function ProspectsPage() {
-  const { fgMinorsBatters, fgMinorsPitchers, players, hkbPlayers, fvRankings, franchiseMappings } = usePlayerStore()
+  const { fgMinorsBatters, fgMinorsPitchers, players, hkbPlayers, fvRankings, prospectRankings, franchiseMappings } = usePlayerStore()
   const hasHydrated = useHydration()
   const [search, setSearch] = useState('')
   const [prospectType, setProspectType] = useState<ProspectType>('all')
@@ -47,6 +48,7 @@ export default function ProspectsPage() {
   const [teamFilter, setTeamFilter] = useState('')
   const [franchiseFilter, setFranchiseFilter] = useState('')
   const [showAvailableOnly, setShowAvailableOnly] = useState(false)
+  const [showRankedOnly, setShowRankedOnly] = useState(false)
   const [sortField, setSortField] = useState<SortField>('wrcPlus')
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
 
@@ -59,14 +61,20 @@ export default function ProspectsPage() {
     const playerMap = new Map(players.map(p => [p.normalizedName, p]))
     const hkbMap = new Map(hkbPlayers.map(p => [p.normalizedName, p]))
     const fvMap = new Map(fvRankings.map(p => [p.normalizedName, p]))
+    const rankingMap = new Map(prospectRankings.map(p => [p.normalizedName, p]))
     const franchiseMap = new Map(franchiseMappings.map(m => [m.shortCode, m.fullName]))
 
     return allProspects.map(prospect => {
       const player = playerMap.get(prospect.normalizedName)
       const hkb = hkbMap.get(prospect.normalizedName)
       const fv = fvMap.get(prospect.normalizedName)
+      const ranking = rankingMap.get(prospect.normalizedName)
       const status = player?.status ?? 'FA'
       const franchise = franchiseMap.get(status) || status
+      // Positive = climbed the MLB Pipeline Top 100 since preseason (or entered it)
+      const rankTrend = ranking?.mlbRank != null
+        ? (ranking.mlbPreseasonRank ?? 101) - ranking.mlbRank
+        : null
 
       return {
         ...prospect,
@@ -80,9 +88,14 @@ export default function ProspectsPage() {
         fvRank: fv?.rank ?? null,
         fvETA: fv?.eta ?? null,
         fvPosition: fv?.position ?? null,
+        mlbRank: ranking?.mlbRank ?? null,
+        mlbPreseasonRank: ranking?.mlbPreseasonRank ?? null,
+        klawRank: ranking?.klawRank ?? null,
+        eta: ranking?.eta ?? fv?.eta ?? null,
+        rankTrend,
       }
     })
-  }, [fgMinorsBatters, fgMinorsPitchers, players, hkbPlayers, fvRankings, franchiseMappings])
+  }, [fgMinorsBatters, fgMinorsPitchers, players, hkbPlayers, fvRankings, prospectRankings, franchiseMappings])
 
   const levels = useMemo(() => {
     const allLevels = new Set(enrichedProspects.map(p => p.currentLevel).filter(Boolean))
@@ -140,6 +153,10 @@ export default function ProspectsPage() {
       result = result.filter(p => p.isAvailable)
     }
 
+    if (showRankedOnly) {
+      result = result.filter(p => p.mlbRank !== null || p.klawRank !== null)
+    }
+
     result.sort((a, b) => {
       let aVal: string | number | null = null
       let bVal: string | number | null = null
@@ -152,6 +169,10 @@ export default function ProspectsPage() {
         case 'age': aVal = a.age; bVal = b.age; break
         case 'hkbRank': aVal = a.hkbRank; bVal = b.hkbRank; break
         case 'hkbValue': aVal = a.hkbValue; bVal = b.hkbValue; break
+        case 'mlbRank': aVal = a.mlbRank; bVal = b.mlbRank; break
+        case 'klawRank': aVal = a.klawRank; bVal = b.klawRank; break
+        case 'eta': aVal = a.eta; bVal = b.eta; break
+        case 'rankTrend': aVal = a.rankTrend; bVal = b.rankTrend; break
         case 'fvGrade': aVal = a.fvGrade; bVal = b.fvGrade; break
         case 'fvRank': aVal = a.fvRank; bVal = b.fvRank; break
         // Batting stats
@@ -196,15 +217,15 @@ export default function ProspectsPage() {
     })
 
     return result
-  }, [enrichedProspects, prospectType, search, levelFilter, minPa, minIp, teamFilter, franchiseFilter, showAvailableOnly, sortField, sortOrder])
+  }, [enrichedProspects, prospectType, search, levelFilter, minPa, minIp, teamFilter, franchiseFilter, showAvailableOnly, showRankedOnly, sortField, sortOrder])
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
       setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')
     } else {
       setSortField(field)
-      const descFields = ['hkbValue', 'fvGrade', 'pa', 'avg', 'obp', 'slg', 'ops', 'iso', 'wrcPlus', 'ip', 'k9', 'kPct', 'kMinusBbPct']
-      const ascFields = ['era', 'fip', 'xfip', 'whip', 'bb9', 'bbPct', 'hkbRank', 'fvRank', 'age', 'level']
+      const descFields = ['hkbValue', 'fvGrade', 'rankTrend', 'pa', 'avg', 'obp', 'slg', 'ops', 'iso', 'wrcPlus', 'ip', 'k9', 'kPct', 'kMinusBbPct']
+      const ascFields = ['era', 'fip', 'xfip', 'whip', 'bb9', 'bbPct', 'hkbRank', 'fvRank', 'mlbRank', 'klawRank', 'eta', 'age', 'level']
       if (descFields.includes(field)) setSortOrder('desc')
       else if (ascFields.includes(field)) setSortOrder('asc')
       else setSortOrder('asc')
@@ -219,6 +240,7 @@ export default function ProspectsPage() {
   const clearFilters = () => {
     setSearch('')
     setShowAvailableOnly(false)
+    setShowRankedOnly(false)
     setLevelFilter('')
     setMinPa('')
     setMinIp('')
@@ -226,7 +248,7 @@ export default function ProspectsPage() {
     setFranchiseFilter('')
   }
 
-  const hasFilters = search || showAvailableOnly || levelFilter || minPa || minIp || teamFilter || franchiseFilter
+  const hasFilters = search || showAvailableOnly || showRankedOnly || levelFilter || minPa || minIp || teamFilter || franchiseFilter
 
   if (!hasHydrated) {
     return (
@@ -323,6 +345,11 @@ export default function ProspectsPage() {
             <span className="text-sm text-gray-700 dark:text-gray-300">Available only</span>
           </label>
 
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={showRankedOnly} onChange={(e) => setShowRankedOnly(e.target.checked)} className="w-4 h-4 text-blue-600 rounded" />
+            <span className="text-sm text-gray-700 dark:text-gray-300">Top 100 only</span>
+          </label>
+
           {hasFilters && (
             <button onClick={clearFilters} className="flex items-center gap-1 px-3 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white">
               <X className="w-4 h-4" /> Clear
@@ -337,10 +364,14 @@ export default function ProspectsPage() {
             <thead className="bg-gray-50 dark:bg-gray-700">
               <tr>
                 <th className={thClass} onClick={() => handleSort('hkbRank')}>HKB <SortIcon field="hkbRank" /></th>
+                <th className={thClass} onClick={() => handleSort('mlbRank')} title="MLB Pipeline Top 100">MLB100 <SortIcon field="mlbRank" /></th>
+                <th className={thClass} onClick={() => handleSort('rankTrend')} title="MLB Pipeline rank change since preseason (▲ = rising)">Trend <SortIcon field="rankTrend" /></th>
+                <th className={thClass} onClick={() => handleSort('klawRank')} title="Keith Law Top 100 (The Athletic)">KLaw <SortIcon field="klawRank" /></th>
                 <th className={thClass} onClick={() => handleSort('fvGrade')}>FV <SortIcon field="fvGrade" /></th>
                 <th className={thClass} onClick={() => handleSort('name')}>Name <SortIcon field="name" /></th>
                 <th className={thClass} onClick={() => handleSort('team')}>Org <SortIcon field="team" /></th>
                 <th className={thClass} onClick={() => handleSort('level')}>Level <SortIcon field="level" /></th>
+                <th className={thClass} onClick={() => handleSort('eta')} title="Projected MLB debut year (MLB Pipeline ETA, FanGraphs fallback)">ETA <SortIcon field="eta" /></th>
                 <th className={thClass} onClick={() => handleSort('age')}>Age <SortIcon field="age" /></th>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">Type</th>
                 {(prospectType === 'all' || prospectType === 'batting') && (
@@ -372,6 +403,21 @@ export default function ProspectsPage() {
               {filteredProspects.slice(0, 200).map((p, i) => (
                 <tr key={`${p.playerId}-${i}`} className={`hover:bg-gray-50 dark:hover:bg-gray-700 ${p.isAvailable ? 'bg-green-50 dark:bg-green-900/20' : ''}`}>
                   <td className="px-3 py-2 text-sm text-gray-900 dark:text-white">{p.hkbRank ?? '—'}</td>
+                  <td className="px-3 py-2 text-sm text-gray-900 dark:text-white tabular-nums font-medium">{p.mlbRank ?? '—'}</td>
+                  <td className="px-3 py-2 text-sm tabular-nums whitespace-nowrap">
+                    {p.rankTrend === null ? (
+                      <span className="text-gray-400 dark:text-gray-500">—</span>
+                    ) : p.mlbPreseasonRank === null ? (
+                      <span className="text-green-600 dark:text-green-400 font-semibold">NEW</span>
+                    ) : p.rankTrend > 0 ? (
+                      <span className="text-green-600 dark:text-green-400 font-semibold">▲{p.rankTrend}</span>
+                    ) : p.rankTrend < 0 ? (
+                      <span className="text-red-500 font-medium">▼{Math.abs(p.rankTrend)}</span>
+                    ) : (
+                      <span className="text-gray-400 dark:text-gray-500">=</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-sm text-gray-900 dark:text-white tabular-nums">{p.klawRank ?? '—'}</td>
                   <td className="px-3 py-2 text-sm font-medium">
                     {p.fvGrade ? (
                       <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-bold ${p.fvGrade >= 60 ? 'bg-purple-100 text-purple-800 dark:bg-purple-800 dark:text-purple-100' : p.fvGrade >= 50 ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-800 dark:text-indigo-100' : 'bg-gray-100 text-gray-800 dark:bg-gray-600 dark:text-gray-100'}`}>
@@ -389,6 +435,13 @@ export default function ProspectsPage() {
                       <span className="ml-1.5 text-xs text-gray-400 dark:text-gray-500">
                         {getLevelParts(p.level).filter(lv => lv !== p.currentLevel).join(', ')}
                       </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-sm tabular-nums">
+                    {p.eta === null ? (
+                      <span className="text-gray-400 dark:text-gray-500">—</span>
+                    ) : (
+                      <span className={p.eta <= 2026 ? 'text-green-600 dark:text-green-400 font-semibold' : p.eta === 2027 ? 'text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'}>{p.eta}</span>
                     )}
                   </td>
                   <td className="px-3 py-2 text-sm text-gray-600 dark:text-gray-400">{p.age}</td>
