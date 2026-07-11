@@ -3,7 +3,7 @@
 import { usePlayerStore } from '@/lib/store'
 import { normalize } from '@/lib/normalize'
 import { useMemo } from 'react'
-import type { Player, SalaryEntry, FVRanking, LeagueStanding } from '@/types'
+import type { Player, SalaryEntry, FVRanking, LeagueStanding, ZipsBatter, ZipsPitcher } from '@/types'
 
 // ============================================================
 // League identity mapping
@@ -194,6 +194,56 @@ interface ResolvedTarget {
   badge: { text: string; tone: 'good' | 'ok' | 'dead' | 'unknown' }
 }
 
+// ------------------------------------------------------------
+// 3-year outlook: ZiPS 2026 fantasy points normalized to a full
+// season (FPTS/G × 150 for hitters; FPTS/IP × 175 for SP, × 65
+// for RP), then aged. Multiplier is per year at the age the
+// player will be that season.
+// ------------------------------------------------------------
+function agingFactor(age: number): number {
+  if (age <= 25) return 1.03
+  if (age <= 29) return 1.0
+  if (age <= 32) return 0.95
+  if (age <= 35) return 0.91
+  return 0.85
+}
+
+interface ThreeYear {
+  y26: number
+  y27: number
+  y28: number
+}
+
+function threeYearOutlook(
+  name: string,
+  age: number | null,
+  zipsBatByName: Map<string, ZipsBatter>,
+  zipsPitByName: Map<string, ZipsPitcher>
+): ThreeYear | null {
+  const key = normalize(name)
+  const bat = zipsBatByName.get(key)
+  const pit = zipsPitByName.get(key)
+  let base: number | null = null
+  if (bat && bat.fptsPerG > 0) base = bat.fptsPerG * 150
+  else if (pit && pit.fptsPerIP > 0) base = pit.fptsPerIP * (pit.gs > 5 ? 175 : 65)
+  if (base === null) return null
+  const a = age ?? 29
+  const y27 = base * agingFactor(a + 1)
+  const y28 = y27 * agingFactor(a + 2)
+  return { y26: Math.round(base), y27: Math.round(y27), y28: Math.round(y28) }
+}
+
+function OutlookCell({ o }: { o: ThreeYear | null }) {
+  if (!o) return <span className="text-gray-400">—</span>
+  const pct28 = o.y26 > 0 ? o.y28 / o.y26 : 1
+  const cls = pct28 < 0.8 ? 'text-red-600 dark:text-red-400' : pct28 > 1.02 ? 'text-green-600 dark:text-green-400' : 'text-gray-600 dark:text-gray-300'
+  return (
+    <span className={`whitespace-nowrap ${cls}`}>
+      {o.y26} → {o.y27} → {o.y28}
+    </span>
+  )
+}
+
 function parseAcqDate(s: string): Date | null {
   if (!s || !s.trim()) return null
   const d = new Date(s.trim())
@@ -266,7 +316,19 @@ function heatColor(points: number | null, teamCount: number): string {
 // ============================================================
 
 export default function DeadlinePage() {
-  const { standings, players, salaries, fvRankings } = usePlayerStore()
+  const { standings, players, salaries, fvRankings, zipsBatters, zipsPitchers } = usePlayerStore()
+
+  const zipsBatByName = useMemo(() => {
+    const m = new Map<string, ZipsBatter>()
+    zipsBatters.forEach(b => m.set(b.normalizedName || normalize(b.name), b))
+    return m
+  }, [zipsBatters])
+
+  const zipsPitByName = useMemo(() => {
+    const m = new Map<string, ZipsPitcher>()
+    zipsPitchers.forEach(p => m.set(p.normalizedName || normalize(p.name), p))
+    return m
+  }, [zipsPitchers])
 
   const playerByName = useMemo(() => {
     const m = new Map<string, Player>()
@@ -326,6 +388,26 @@ export default function DeadlinePage() {
     return [...seen.values()].sort((a, b) => (a.player?.rkOv ?? 99999) - (b.player?.rkOv ?? 99999))
   }, [salaries, playerByName])
 
+  // Near-term deals (ending 2027–28): not forced sales, but aging vets here are
+  // payroll-shedding candidates. Trading avoids §4.8 dead cap entirely (dropping
+  // costs 80% / 60% / 40% of AAV over three years).
+  const shedList = useMemo(() => {
+    const seen = new Map<string, { entry: SalaryEntry; player: Player | null }>()
+    for (const s of salaries) {
+      if (s.franchise !== OUR_SALARY_FRANCHISE) continue
+      if (s.contractEnds !== 2027 && s.contractEnds !== 2028) continue
+      if (/minors/i.test(s.contractType)) continue
+      const key = s.normalizedName || normalize(s.playerName)
+      const player = playerByName.get(key) ?? null
+      if (player && player.status !== OUR_CODE) continue
+      if (!seen.has(key)) seen.set(key, { entry: s, player })
+    }
+    // Oldest and most expensive first — that's the shed order
+    return [...seen.values()].sort(
+      (a, b) => (b.player?.age ?? 0) - (a.player?.age ?? 0) || b.entry.salary - a.entry.salary
+    )
+  }, [salaries, playerByName])
+
   if (!standings.length) {
     return (
       <div className="text-center py-16 text-gray-500 dark:text-gray-400">
@@ -343,8 +425,10 @@ export default function DeadlinePage() {
           We are <span className="font-semibold">sellers</span>. The plan: move players with <span className="font-semibold">no
           control after 2026</span> — expiring FA deals, final-year YP contracts, and every in-season pickup (all in-season
           contracts are 1-year, Constitution §4.6) — for <span className="font-semibold">young controlled MLB players or top
-          prospects</span>. Contract badges below are resolved live from salaries.csv, all.csv and fv_rankings.csv: a red
-          badge means the target’s contract also expires in 2026 and is worthless to acquire.
+          prospects</span>. Beyond the rentals, aging vets on near-term deals (through 2027–28, e.g. Freeman) are
+          payroll-shedding candidates. Contract badges below are resolved live from salaries.csv, all.csv and
+          fv_rankings.csv: a red badge means the target’s contract also expires in 2026 and is worthless to acquire.
+          3-yr outlook columns are ZiPS 2026 fantasy points normalized to a full season, then aged through 2028.
         </p>
       </div>
 
@@ -417,6 +501,7 @@ export default function DeadlinePage() {
                 <th className="py-1 pr-3 text-right">Rank</th>
                 <th className="py-1 pr-3 text-right">Salary</th>
                 <th className="py-1 pr-3">Acquired</th>
+                <th className="py-1 pr-3">3-yr outlook ’26→’28</th>
                 <th className="py-1 pr-3">Status</th>
               </tr>
             </thead>
@@ -433,6 +518,9 @@ export default function DeadlinePage() {
                     <td className="py-1.5 pr-3 text-right text-gray-600 dark:text-gray-300">{player?.rkOv ? `#${player.rkOv}` : '—'}</td>
                     <td className="py-1.5 pr-3 text-right text-gray-600 dark:text-gray-300">{fmtSalary(entry.salary)}</td>
                     <td className="py-1.5 pr-3 text-gray-600 dark:text-gray-300 whitespace-nowrap">{entry.acquisitionDate || '—'}</td>
+                    <td className="py-1.5 pr-3 text-xs">
+                      <OutlookCell o={threeYearOutlook(entry.playerName, player?.age ?? null, zipsBatByName, zipsPitByName)} />
+                    </td>
                     <td className="py-1.5 pr-3 whitespace-nowrap">
                       <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${inSeason ? 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200' : isYP ? 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200' : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200'}`}>
                         {inSeason ? 'In-season pickup' : isYP ? 'YP — final year' : 'Expiring FA deal'}
@@ -444,6 +532,71 @@ export default function DeadlinePage() {
             </tbody>
           </table>
         </div>
+      </section>
+
+      {/* Payroll shed candidates */}
+      <section className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">Payroll shed candidates — deals ending 2027–28</h2>
+        <p className="text-xs text-gray-500 dark:text-gray-400 mb-3 max-w-4xl">
+          Not forced sales, but every dollar and roster spot here has an opportunity cost. Aging vets (Freeman is the
+          headline: elite AVG/OBP right now, but 36 with {fmtSalary(29_520_000)}/yr through 2028) are worth more to a
+          contender today than they will ever be to us — and trading avoids the §4.8 dead-cap hit entirely (dropping costs
+          80% / 60% / 40% of AAV over three years). Young core on this list is shown for completeness; keep unless blown away.
+        </p>
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="text-left text-gray-500 dark:text-gray-400 text-xs">
+                <th className="py-1 pr-3">Player</th>
+                <th className="py-1 pr-3">Pos</th>
+                <th className="py-1 pr-3 text-right">Age</th>
+                <th className="py-1 pr-3 text-right">Rank</th>
+                <th className="py-1 pr-3 text-right">$/yr</th>
+                <th className="py-1 pr-3">Thru</th>
+                <th className="py-1 pr-3 text-right">Committed</th>
+                <th className="py-1 pr-3">3-yr outlook ’26→’28</th>
+                <th className="py-1 pr-3">Verdict</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shedList.map(({ entry, player }) => {
+                const age = player?.age ?? null
+                const yearsLeft = entry.contractEnds - 2026 + 1
+                const committed = entry.salary * yearsLeft
+                const isYP = /yp/i.test(entry.contractType)
+                const verdict = isYP
+                  ? { text: 'Cheap — keep', cls: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' }
+                  : age !== null && age >= 34
+                    ? { text: 'Age cliff — shop now', cls: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' }
+                    : age !== null && age >= 30
+                      ? { text: 'Listen on offers', cls: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200' }
+                      : { text: 'Young core — keep', cls: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' }
+                return (
+                  <tr key={entry.playerName} className="border-t border-gray-100 dark:border-gray-700">
+                    <td className="py-1.5 pr-3 font-medium text-gray-900 dark:text-white whitespace-nowrap">{entry.playerName}</td>
+                    <td className="py-1.5 pr-3 text-gray-600 dark:text-gray-300 whitespace-nowrap">{player?.position ?? '—'}</td>
+                    <td className="py-1.5 pr-3 text-right text-gray-600 dark:text-gray-300">{age ?? '—'}</td>
+                    <td className="py-1.5 pr-3 text-right text-gray-600 dark:text-gray-300">{player?.rkOv ? `#${player.rkOv}` : '—'}</td>
+                    <td className="py-1.5 pr-3 text-right text-gray-600 dark:text-gray-300">{isYP ? 'YP' : fmtSalary(entry.salary)}</td>
+                    <td className="py-1.5 pr-3 text-gray-600 dark:text-gray-300">{entry.contractEnds}</td>
+                    <td className="py-1.5 pr-3 text-right text-gray-600 dark:text-gray-300">{isYP ? '—' : fmtSalary(committed)}</td>
+                    <td className="py-1.5 pr-3 text-xs">
+                      <OutlookCell o={threeYearOutlook(entry.playerName, age, zipsBatByName, zipsPitByName)} />
+                    </td>
+                    <td className="py-1.5 pr-3 whitespace-nowrap">
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${verdict.cls}`}>{verdict.text}</span>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+          Freeman fits the buyers who need batting rates: J.D. Barnett (AVG 8) and Ross &amp; Jack (AVG 7, OBP 5) — both
+          also need his cap-friendly production more than prospects they’d otherwise hoard. Injured arms (Burnes, Steele)
+          can’t be moved at value — hold and revisit in the offseason. “Committed” = salary × seasons remaining including 2026.
+        </p>
       </section>
 
       {/* Deal sheets */}
@@ -508,6 +661,7 @@ export default function DeadlinePage() {
                         <th className="py-1 pr-3 text-right">Age</th>
                         <th className="py-1 pr-3 text-right">Rank</th>
                         <th className="py-1 pr-3">Prospect</th>
+                        <th className="py-1 pr-3">3-yr outlook ’26→’28</th>
                         <th className="py-1 pr-3">Contract</th>
                         <th className="py-1 pr-3">Note</th>
                       </tr>
@@ -521,6 +675,9 @@ export default function DeadlinePage() {
                           <td className="py-1.5 pr-3 text-right text-gray-600 dark:text-gray-300">{t.rkOv ? `#${t.rkOv}` : '—'}</td>
                           <td className="py-1.5 pr-3 text-gray-600 dark:text-gray-300 whitespace-nowrap">
                             {t.fv ? `FV ${t.fv.fv} · FG #${t.fv.rank}${t.fv.eta ? ` · ETA ${t.fv.eta}` : ''}` : '—'}
+                          </td>
+                          <td className="py-1.5 pr-3 text-xs">
+                            <OutlookCell o={threeYearOutlook(t.name, t.age, zipsBatByName, zipsPitByName)} />
                           </td>
                           <td className="py-1.5 pr-3 whitespace-nowrap">
                             <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${BADGE_CLS[t.badge.tone]}`}>{t.badge.text}</span>
@@ -549,7 +706,10 @@ export default function DeadlinePage() {
           Method: standings cells are Fantrax roto category points (rank-based), so margins within a category are not
           visible here — treat “gettable” categories as directional. Buyer/seller tiers, position needs and asks reflect
           the July 10, 2026 snapshot; contract badges re-resolve automatically whenever salaries.csv or all.csv are
-          refreshed on the Upload page.
+          refreshed on the Upload page. 3-yr outlook = ZiPS 2026 fantasy points normalized to a full season (FPTS/G × 150
+          for hitters, FPTS/IP × 175 for SP or × 65 for RP), aged with a simple curve: +3%/yr through age 25, flat 26–29,
+          −5%/yr at 30–32, −9%/yr at 33–35, −15%/yr at 36+. A rough decline model, not a real multi-year ZiPS — use for
+          trend, not precision.
         </p>
       </section>
     </div>
