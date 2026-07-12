@@ -428,6 +428,44 @@ export default function DeadlinePage() {
     )
   }, [salaries, playerByName])
 
+  // Long-deal targets: players on OTHER rosters controlled through 2029+.
+  // The flip side of selling rentals — instead of only prospects back, a
+  // prime-age player locked up long-term is a legitimate ask. Resolved live
+  // from salaries.csv (still-rostered check via all.csv, like the sell list).
+  const longDealList = useMemo(() => {
+    const franchiseInfo = new Map<string, { team: string; code: string }>()
+    Object.entries(TEAM_INFO).forEach(([team, info]) => franchiseInfo.set(info.salaryFranchise, { team, code: info.code }))
+    const seen = new Map<string, { entry: SalaryEntry; player: Player | null; team: string }>()
+    for (const s of salaries) {
+      if (s.franchise === OUR_SALARY_FRANCHISE) continue
+      if (s.contractEnds < 2029) continue
+      if (/minors|yp/i.test(s.contractType)) continue
+      const info = franchiseInfo.get(s.franchise)
+      if (!info) continue
+      const key = s.normalizedName || normalize(s.playerName)
+      const player = playerByName.get(key) ?? null
+      if (player && player.status !== info.code) continue // dropped or moved since
+      if (!seen.has(key)) seen.set(key, { entry: s, player, team: info.team })
+    }
+    return [...seen.values()].sort((a, b) => (a.player?.rkOv ?? 99999) - (b.player?.rkOv ?? 99999))
+  }, [salaries, playerByName])
+
+  // Our committed payroll for 2027/2028 (cap = $150M in 2024, +$10M/yr),
+  // to judge whether we can absorb a long deal. Excludes dead cap.
+  const capRoom = useMemo(() => {
+    const committed: Record<number, number> = { 2027: 0, 2028: 0 }
+    for (const s of salaries) {
+      if (s.franchise !== OUR_SALARY_FRANCHISE) continue
+      if (/minors/i.test(s.contractType)) continue
+      const key = s.normalizedName || normalize(s.playerName)
+      const player = playerByName.get(key) ?? null
+      if (player && player.status !== OUR_CODE) continue
+      committed[2027] += s.salaryByYear[2027] ?? 0
+      committed[2028] += s.salaryByYear[2028] ?? 0
+    }
+    return { 2027: { committed: committed[2027], cap: 180_000_000 }, 2028: { committed: committed[2028], cap: 190_000_000 } }
+  }, [salaries, playerByName])
+
   if (!standings.length) {
     return (
       <div className="text-center py-16 text-gray-500 dark:text-gray-400">
@@ -444,8 +482,9 @@ export default function DeadlinePage() {
         <p className="mt-2 text-sm text-gray-600 dark:text-gray-300 max-w-4xl">
           We are <span className="font-semibold">sellers</span>. The plan: move players with <span className="font-semibold">no
           control after 2026</span> — expiring FA deals, final-year YP contracts, and every in-season pickup (all in-season
-          contracts are 1-year, Constitution §4.6) — for <span className="font-semibold">young controlled MLB players or top
-          prospects</span>. Beyond the rentals, aging vets on near-term deals (through 2027–28, e.g. Freeman) are
+          contracts are 1-year, Constitution §4.6) — for <span className="font-semibold">young controlled MLB players, top
+          prospects, or a prime-age player already locked up on a long deal</span> (see the long-deal targets table below).
+          Beyond the rentals, aging vets on near-term deals (through 2027–28, e.g. Freeman) are
           payroll-shedding candidates. Contract badges below are resolved live from salaries.csv, all.csv and
           fv_rankings.csv: a red badge means the target’s contract also expires in 2026 and is worthless to acquire.
           3-yr outlook columns are real FanGraphs ZiPS 2026 / 2027 / 2028 projections: wRC+ for hitters, ERA+ for pitchers (100 = league average, higher is better for both).
@@ -616,6 +655,84 @@ export default function DeadlinePage() {
           Freeman fits the buyers who need batting rates: J.D. Barnett (AVG 8) and Ross &amp; Jack (AVG 7, OBP 5) — both
           also need his cap-friendly production more than prospects they’d otherwise hoard. Injured arms (Burnes, Steele)
           can’t be moved at value — hold and revisit in the offseason. “Committed” = salary × seasons remaining including 2026.
+        </p>
+      </section>
+
+      {/* Long-deal targets */}
+      <section className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">Long-deal targets — controlled through 2029+ on other rosters</h2>
+        <p className="text-xs text-gray-500 dark:text-gray-400 mb-3 max-w-4xl">
+          The other side of selling: instead of only prospects back, a prime-age player already locked up long-term is a
+          legitimate ask — no FA bidding war, no prospect bust risk. We have the cap room to absorb one:
+          committed payroll {fmtSalary(capRoom[2027].committed)} of {fmtSalary(capRoom[2027].cap)} in 2027
+          and {fmtSalary(capRoom[2028].committed)} of {fmtSalary(capRoom[2028].cap)} in 2028 (excl. dead cap).
+          Buyers can be paid with our rentals; seller-owned players here would need prospects going back instead.
+        </p>
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="text-left text-gray-500 dark:text-gray-400 text-xs">
+                <th className="py-1 pr-3">Player</th>
+                <th className="py-1 pr-3">Team</th>
+                <th className="py-1 pr-3">Tier</th>
+                <th className="py-1 pr-3">Pos</th>
+                <th className="py-1 pr-3 text-right">Age</th>
+                <th className="py-1 pr-3 text-right">Rank</th>
+                <th className="py-1 pr-3 text-right">$/yr</th>
+                <th className="py-1 pr-3">Thru</th>
+                <th className="py-1 pr-3 text-right">Committed</th>
+                <th className="py-1 pr-3">3-yr wRC+ / ERA+ ’26→’28</th>
+                <th className="py-1 pr-3">Verdict</th>
+              </tr>
+            </thead>
+            <tbody>
+              {longDealList.map(({ entry, player, team }) => {
+                const tier = TIERS[team]
+                const age = player?.age ?? null
+                const rk = player?.rkOv ?? null
+                const committed = Object.entries(entry.salaryByYear).reduce(
+                  (sum, [yr, amt]) => (Number(yr) >= 2026 ? sum + amt : sum),
+                  0
+                )
+                const verdict =
+                  rk === null
+                    ? { text: 'No rank data', cls: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300' }
+                    : rk <= 150 && age !== null && age <= 28
+                      ? { text: 'Prime target — ask', cls: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' }
+                      : rk <= 150
+                        ? { text: 'Good, but aging money', cls: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200' }
+                        : rk <= 400
+                          ? { text: 'Only at a discount', cls: 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200' }
+                          : { text: 'Bad money — avoid', cls: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' }
+                return (
+                  <tr key={entry.playerName} className="border-t border-gray-100 dark:border-gray-700">
+                    <td className="py-1.5 pr-3 font-medium text-gray-900 dark:text-white whitespace-nowrap">{entry.playerName}</td>
+                    <td className="py-1.5 pr-3 text-gray-600 dark:text-gray-300 whitespace-nowrap">{team}</td>
+                    <td className="py-1.5 pr-3 whitespace-nowrap">
+                      {tier && <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${tier.cls}`}>{tier.label}</span>}
+                    </td>
+                    <td className="py-1.5 pr-3 text-gray-600 dark:text-gray-300 whitespace-nowrap">{player?.position ?? '—'}</td>
+                    <td className="py-1.5 pr-3 text-right text-gray-600 dark:text-gray-300">{age ?? '—'}</td>
+                    <td className="py-1.5 pr-3 text-right text-gray-600 dark:text-gray-300">{rk ? `#${rk}` : '—'}</td>
+                    <td className="py-1.5 pr-3 text-right text-gray-600 dark:text-gray-300">{fmtSalary(entry.salary)}</td>
+                    <td className="py-1.5 pr-3 text-gray-600 dark:text-gray-300">{entry.contractEnds}</td>
+                    <td className="py-1.5 pr-3 text-right text-gray-600 dark:text-gray-300">{fmtSalary(committed)}</td>
+                    <td className="py-1.5 pr-3 text-xs">
+                      <OutlookCell o={threeYearOutlook(entry.playerName, zips26, zips27, zips28)} />
+                    </td>
+                    <td className="py-1.5 pr-3 whitespace-nowrap">
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${verdict.cls}`}>{verdict.text}</span>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+          “Committed” = sum of remaining salary hits from 2026 on. Verdicts are mechanical (rank + age bands) — a green
+          badge means “open the conversation,” not “pay anything.” The salary going back matters too: taking on a big deal
+          is itself part of the price, so a buyer shedding one of these may accept a lighter prospect package.
         </p>
       </section>
 
