@@ -2,196 +2,41 @@
 
 import { usePlayerStore } from '@/lib/store'
 import { normalize } from '@/lib/normalize'
+import { FRANCHISES, type Franchise } from '@/lib/franchises'
 import { useMemo } from 'react'
-import type { Player, SalaryEntry, FVRanking, LeagueStanding, ZipsBatter, ZipsPitcher } from '@/types'
+import TargetsSection from './TargetsSection'
+import { buildDealSheets, type DealSheet, type SendCandidate, type AskCandidate } from '@/lib/tradeEngine'
+import { isExpiring, remainingContract, fmtM } from '@/lib/contracts'
+import type { Player, SalaryEntry, LeagueStanding, ZipsBatter, ZipsPitcher } from '@/types'
 
 // ============================================================
-// League identity mapping
-// Fantrax standings use team names; all.csv uses status codes;
-// salaries.csv uses owner names. Verified via roster evidence
-// (e.g. Elly De La Cruz: status ELLY, salaries "Dustin Hart & Max Wamp").
+// League identity mapping — canonical table lives in lib/franchises.ts
+// (Fantrax standings team names ↔ all.csv status codes ↔ salaries.csv
+// owner names, verified by roster-name overlap).
 // ============================================================
 
 const OUR_CODE = 'C&G'
 const OUR_SALARY_FRANCHISE = 'Colin Wilson & Greg Holmes'
+const OUR_DISPLAY = 'Colin Wilson & Greg Holmes'
 const SEASON_START = new Date(2026, 2, 20) // acquisitions after this = in-season pickups (Section 4.6: 1-year deals)
 
-const TEAM_INFO: Record<string, { code: string; salaryFranchise: string }> = {
-  'Bionic Big Boys': { code: 'B&A', salaryFranchise: 'Ben Brody & Aaron' },
-  'J.D. Barnett': { code: 'JD', salaryFranchise: 'JD Barnett' },
-  'Ellygal Immigrants': { code: 'ELLY', salaryFranchise: 'Dustin Hart & Max Wamp' },
-  'Tyler': { code: 'T', salaryFranchise: 'Tyler Hart' },
-  'Zack': { code: 'Zack', salaryFranchise: 'Zack Semler' },
-  'Steve Cornish': { code: 'Steve', salaryFranchise: 'Steve Cornish' },
-  'Ross & Jack': { code: 'R&J', salaryFranchise: 'Ross & Jack Kantor' },
-  'Colin & Greg': { code: 'C&G', salaryFranchise: OUR_SALARY_FRANCHISE },
-  'E.T. Phone Holmes': { code: 'J&A', salaryFranchise: 'Jake Zuckman & Andrew Meyers' },
-  'Max Mastbaum & co': { code: 'Max', salaryFranchise: 'Max, Jake & Sam' },
-  'Kai Nelson': { code: 'Kai', salaryFranchise: 'Kai Nelson' },
-  'Brian Frederick': { code: 'Brian', salaryFranchise: 'Brian Frederick' },
-  'Brenden': { code: 'Brenden', salaryFranchise: 'Brenden Freedman' },
-  'Ethan Gobetz': { code: 'Ethan', salaryFranchise: 'Ethan Gobetz' },
-}
-
-const TIERS: Record<string, { label: string; cls: string }> = {
-  'Bionic Big Boys': { label: 'Buyer', cls: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' },
-  'J.D. Barnett': { label: 'Buyer', cls: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' },
-  'Ellygal Immigrants': { label: 'Buyer', cls: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' },
-  'Tyler': { label: 'Buyer', cls: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' },
-  'Zack': { label: 'Aggressive buyer', cls: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200' },
-  'Steve Cornish': { label: 'Aggressive buyer', cls: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200' },
-  'Ross & Jack': { label: 'Bubble buyer', cls: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200' },
-  'Colin & Greg': { label: 'Seller (us)', cls: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' },
-  'E.T. Phone Holmes': { label: 'Seller (rival)', cls: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' },
-  'Max Mastbaum & co': { label: 'Seller (rival)', cls: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' },
-  'Kai Nelson': { label: 'Seller', cls: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' },
-  'Brian Frederick': { label: 'Seller', cls: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' },
-  'Brenden': { label: 'Seller', cls: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' },
-  'Ethan Gobetz': { label: 'Seller', cls: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' },
-}
+const TEAM_INFO: Record<string, Franchise> = Object.fromEntries(
+  FRANCHISES.map(f => [f.fantraxName, f])
+)
 
 const SCORED_CATS = ['R', 'HR', 'RBI', 'SB', 'AVG', 'OBP', 'SLG', 'K', 'QS', 'SV', 'HLD', 'ERA', 'BB/9', 'H/IP']
 
-// ============================================================
-// Deal sheets — narrative from the July '26 seller analysis.
-// Target contract status is resolved LIVE from salaries.csv /
-// all.csv / fv_rankings.csv, so a stale target auto-flags red.
-// ============================================================
-
-interface BuyerPlan {
-  team: string
-  headline: string
-  rationale: string
-  positionNeeds: string
-  send: string
-  targets: { name: string; note: string }[]
-}
-
-const BUYER_PLANS: BuyerPlan[] = [
-  {
-    team: 'Steve Cornish',
-    headline: 'Our best trade partner',
-    rationale:
-      'Elite rates on both sides (ERA / BB9 / H-IP, AVG / OBP) but last-tier volume — bottom three in HR, R, RBI and K with ~170 games in hand vs the league average. Every counting-stat bat or innings arm we send gets amplified by the games he has left to play.',
-    positionNeeds: '2B is literally empty; OF production (Happ & Teoscar in down years, Acuña ranked #250); strikeout innings behind Wheeler.',
-    send: 'Semien + Pasquantino, sweetened with Raley or Merrill Kelly',
-    targets: [
-      { name: 'Walker Jenkins', note: 'The prize — AAA CF, ETA 2026' },
-      { name: 'Cade Horton', note: 'Young MLB arm, strong alternate' },
-      { name: 'Colson Montgomery', note: 'Controlled long-term but $23M/yr — only if we want the bat that badly' },
-      { name: 'Hagen Smith', note: 'Farm fallback' },
-      { name: 'Charlie Condon', note: 'Farm fallback' },
-      { name: 'Aiva Arquette', note: 'Farm fallback' },
-    ],
-  },
-  {
-    team: 'Ellygal Immigrants',
-    headline: 'Biggest single hole on any contender',
-    rationale:
-      'The bullpen carries their ratios (HLD 14, H/IP 14, SV 13) but the rotation is Foster Griffin and prospects — QS 4 and K 5. Every real starter added swings two categories at once, so they should pay full freight for arms.',
-    positionNeeds: 'Starting pitching above all; 3B (Durbin/Baty); corner-OF power (Stanton ranked #364).',
-    send: 'Bregman + Will Warren (or Merrill Kelly)',
-    targets: [
-      { name: 'Carter Jensen', note: 'Buried in a 3-catcher glut behind Herrera & Hicks — catcher is our thinnest long-term spot' },
-      { name: 'Brooks Lee', note: 'Cheapest controlled MLB bat on any buyer' },
-      { name: 'Luke Keaschall', note: 'Young MLB 2B' },
-      { name: 'Jakob Marsee', note: 'Young MLB CF' },
-      { name: 'Kade Anderson', note: 'Farm arm' },
-    ],
-  },
-  {
-    team: 'Ross & Jack',
-    headline: 'Motivated bubble team',
-    rationale:
-      'QS volume (12.5) but the innings are bad ones (ERA 3, H/IP 3), and the offense slugs nothing (SLG 4, HR 7) behind Soto and Tucker. Only 2.5 points ahead of us — the buyer most likely to overpay to stay alive.',
-    positionNeeds: '3B (Andújar ranked #584); corner power; a ratio-safe reliever.',
-    send: 'Bregman + Sheets (or Sewald)',
-    targets: [
-      { name: 'Harry Ford', note: 'MLB-ready C blocked behind Hunter Goodman — fills our catcher need' },
-      { name: 'Justin Crawford', note: 'Young OF' },
-      { name: 'Chandler Simpson', note: 'Young OF, elite speed' },
-      { name: 'Angel Genao', note: 'Farm SS' },
-      { name: 'JR Ritchie', note: 'Farm arm' },
-      { name: 'Jaxon Wiggins', note: 'Farm arm' },
-    ],
-  },
-  {
-    team: 'Bionic Big Boys',
-    headline: 'Leader buying insurance',
-    rationale:
-      'Offense is nearly maxed out (12s and 13s across the board), so all their upside is pitching: HLD 6.5, SV 8, K 8. They want ratio-safe relief that will not dent an ERA of 13 — exactly what our expiring arms are.',
-    positionNeeds: 'Setup corps behind Hader/Weaver; catcher (only an aging Salvador Pérez); CF depth.',
-    send: 'Sewald + Kerkering',
-    targets: [
-      { name: 'Cam Smith', note: 'The ask — their other young MLB bats (Carter, Winn) proved to be expiring' },
-      { name: 'Jonah Tong', note: 'Farm arm, ETA now' },
-      { name: 'Joe Mack', note: 'Farm C' },
-      { name: 'Ryan Waldschmidt', note: 'Farm OF' },
-      { name: 'Connelly Early', note: 'Young MLB arm on a cheap deal' },
-    ],
-  },
-  {
-    team: 'Tyler',
-    headline: 'Most desperate, farm-only return',
-    rationale:
-      'Batting is literally capped (14s everywhere, SV 14 too) — 100% of his upside is starting pitching: ERA 2, BB/9 1, QS 5. Desperation is leverage for us, but his young MLB bats are expiring or expensive, so the return must come off the farm.',
-    positionNeeds: 'Two starting pitchers; setup relief (HLD 5). No batting needs whatsoever.',
-    send: 'Merrill Kelly + Will Warren + Kerkering',
-    targets: [
-      { name: 'Jett Williams', note: 'Farm MI/OF' },
-      { name: 'Lazaro Montes', note: 'Farm power bat' },
-      { name: 'Franklin Arias', note: 'Farm SS' },
-      { name: 'Moises Ballesteros', note: 'Controlled but $16.1M/yr — only at a discount' },
-    ],
-  },
-  {
-    team: 'J.D. Barnett',
-    headline: 'Clear buyer, weak return fit',
-    rationale:
-      'Elite offense plus K/SV, but every ratio category sits at 5 (ERA, BB/9, H/IP) — needs quality innings, not volume. Thin farm, and his one blocked young bat (Soderstrom) costs $20M/yr through 2032, so the realistic return is limited.',
-    positionNeeds: 'Ratio-friendly SP/RP; SS (Tovar and Seager both cratering); AVG help.',
-    send: 'Sewald (or Bregman)',
-    targets: [
-      { name: 'Jarlin Susana', note: 'Farm arm' },
-      { name: 'Seth Hernandez', note: 'Farm arm, long ETA' },
-      { name: 'Ezequiel Tovar', note: 'Cheap SS flier' },
-    ],
-  },
-  {
-    team: 'Zack',
-    headline: 'Needs power and outfielders',
-    rationale:
-      'Young rotation front (Schlittler, Woo) with nothing behind it (ERA 4, QS 6.5), and the offense lacks pop: HR 8, RBI 9, SLG 9. His best outfielder is Jung Hoo Lee at #192 — the worst contender outfield in the league.',
-    positionNeeds: 'Power OF; a veteran QS/ERA starter. SB 4 looks like a punt — no speed needed.',
-    send: 'Raley + Sheets',
-    targets: [
-      { name: 'Kyson Witherspoon', note: 'Farm arm' },
-      { name: 'Jurrangelo Cijntje', note: 'Farm arm' },
-      { name: 'Alfredo Duno', note: 'Farm C, if he bites hard' },
-    ],
-  },
-]
-
-// Targets vetted and ruled out: their contracts also end in 2026 (or the price is a salary dump)
-const RULED_OUT = [
-  'Jackson Chourio (FA deal ends 2026)',
-  'Evan Carter & Masyn Winn (YP deals expire 2026)',
-  'Kyle Harrison, Angel Martínez, Daylen Lile (all end 2026)',
-  'Tyler Soderstrom ($20M/yr through 2032 — a salary dump, not a prospect return)',
-]
-
-// ============================================================
-// Live data resolution
-// ============================================================
-
-interface ResolvedTarget {
-  name: string
-  note: string
-  position: string
-  age: number | null
-  rkOv: number | null
-  fv: FVRanking | null
-  badge: { text: string; tone: 'good' | 'ok' | 'dead' | 'unknown' }
+// Buyer/seller tier from the real standings: above us by a clear margin =
+// buyer, just above us = bubble, at or below us = seller.
+const BUBBLE_MARGIN = 6
+function computeTier(row: LeagueStanding, ourPoints: number): { label: string; cls: string } {
+  if (TEAM_INFO[row.team]?.code === OUR_CODE)
+    return { label: 'Seller (us)', cls: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' }
+  if (row.points <= ourPoints)
+    return { label: 'Seller', cls: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' }
+  if (row.points - ourPoints <= BUBBLE_MARGIN)
+    return { label: 'Bubble buyer', cls: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200' }
+  return { label: 'Buyer', cls: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' }
 }
 
 // ------------------------------------------------------------
@@ -272,55 +117,37 @@ function fmtSalary(n: number): string {
   return n >= 1_000_000 ? `$${(n / 1_000_000).toFixed(1)}M` : n > 0 ? `$${Math.round(n / 1000)}k` : '—'
 }
 
-function resolveTarget(
-  spec: { name: string; note: string },
-  buyerFranchise: string,
-  buyerCode: string,
-  salaryByName: Map<string, SalaryEntry[]>,
-  playerByName: Map<string, Player>,
-  fvByName: Map<string, FVRanking>
-): ResolvedTarget {
-  const key = normalize(spec.name)
-  const player = playerByName.get(key) ?? null
-  const fv = fvByName.get(key) ?? null
-  const entries = salaryByName.get(key) ?? []
-  const entry = entries.find(e => e.franchise === buyerFranchise) ?? entries[0] ?? null
-
-  let badge: ResolvedTarget['badge']
-  if (entry && /minors/i.test(entry.contractType)) {
-    badge = { text: 'Farm — free', tone: 'good' }
-  } else if (entry && /yp/i.test(entry.contractType)) {
-    badge =
-      entry.contractEnds >= 2027
-        ? { text: `YP thru ${entry.contractEnds}`, tone: 'good' }
-        : { text: 'YP expires 2026 — dead', tone: 'dead' }
-  } else if (entry) {
-    badge =
-      entry.contractEnds >= 2027
-        ? { text: `${fmtSalary(entry.salary)}/yr thru ${entry.contractEnds}`, tone: entry.salary >= 15_000_000 ? 'ok' : 'good' }
-        : { text: 'Expiring 2026 — dead', tone: 'dead' }
-  } else if (player && player.status === buyerCode) {
-    badge = { text: 'Farm — free', tone: 'good' }
-  } else {
-    badge = { text: 'No contract data', tone: 'unknown' }
-  }
-
-  return {
-    name: spec.name,
-    note: spec.note,
-    position: player?.position ?? fv?.position ?? '',
-    age: player?.age ?? null,
-    rkOv: player?.rkOv ?? null,
-    fv,
-    badge,
-  }
-}
-
-const BADGE_CLS: Record<ResolvedTarget['badge']['tone'], string> = {
+const BADGE_CLS: Record<'good' | 'ok' | 'dead' | 'unknown', string> = {
   good: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
   ok: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200',
   dead: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
   unknown: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
+}
+
+// Contract badge for an ask, straight off the joined player record.
+function askBadge(p: Player): { text: string; tone: keyof typeof BADGE_CLS } {
+  const isFarm = p.hkbLevel !== null && p.hkbLevel !== 'MLB'
+  if (/minors/i.test(p.contractType ?? '') || (p.contractEnds == null && isFarm)) return { text: 'Farm — free', tone: 'good' }
+  if (/yp/i.test(p.contractType ?? '')) return { text: `YP thru ${p.contractEnds}`, tone: 'good' }
+  if (p.contractEnds != null) {
+    const c = remainingContract(p)
+    return { text: `${fmtM(c.aav)}/yr thru ${p.contractEnds}`, tone: c.aav >= 15_000_000 ? 'ok' : 'good' }
+  }
+  return { text: 'No contract data', tone: 'unknown' }
+}
+
+function sendContract(p: Player): string {
+  if (isExpiring(p)) return 'Expiring 2026'
+  if (p.contractEnds == null) return '—'
+  return `${fmtM(remainingContract(p).aav)}/yr thru ${p.contractEnds}`
+}
+
+function DeltaCell({ v }: { v: number }) {
+  return (
+    <span className={`font-bold tabular-nums ${v > 0 ? 'text-green-600 dark:text-green-400' : v < 0 ? 'text-red-500 dark:text-red-400' : 'text-gray-400'}`}>
+      {v > 0 ? `+${v}` : v}
+    </span>
+  )
 }
 
 function heatColor(points: number | null, teamCount: number): string {
@@ -334,7 +161,7 @@ function heatColor(points: number | null, teamCount: number): string {
 // ============================================================
 
 export default function DeadlinePage() {
-  const { standings, players, salaries, fvRankings, zipsBatters, zipsPitchers, zips27Batters, zips27Pitchers, zips28Batters, zips28Pitchers } = usePlayerStore()
+  const { standings, players, salaries, zipsBatters, zipsPitchers, zips27Batters, zips27Pitchers, zips28Batters, zips28Pitchers } = usePlayerStore()
 
   const buildYearMaps = (bats: ZipsBatter[], pits: ZipsPitcher[]): ZipsYearMaps => {
     const bat = new Map<string, ZipsBatter>()
@@ -359,34 +186,16 @@ export default function DeadlinePage() {
     return m
   }, [players])
 
-  const salaryByName = useMemo(() => {
-    const m = new Map<string, SalaryEntry[]>()
-    salaries.forEach(s => {
-      const k = s.normalizedName || normalize(s.playerName)
-      const arr = m.get(k) ?? []
-      arr.push(s)
-      m.set(k, arr)
-    })
-    return m
-  }, [salaries])
-
-  const fvByName = useMemo(() => {
-    const m = new Map<string, FVRanking>()
-    fvRankings.forEach(f => m.set(f.normalizedName || normalize(f.name), f))
-    return m
-  }, [fvRankings])
-
   const sorted = useMemo(
     () => [...standings].sort((a, b) => a.rank - b.rank),
     [standings]
   )
   const teamCount = sorted.length || 14
   const avgGP = sorted.length ? sorted.reduce((s, t) => s + t.gamesPlayed, 0) / sorted.length : 0
-  const standingsByTeam = useMemo(() => {
-    const m = new Map<string, LeagueStanding>()
-    sorted.forEach(s => m.set(s.team, s))
-    return m
-  }, [sorted])
+  const ourPoints = sorted.find(r => TEAM_INFO[r.team]?.code === OUR_CODE)?.points ?? 0
+
+  // Trade engine: RoS roto states, sends, asks and a suggested package per franchise
+  const engine = useMemo(() => buildDealSheets(players, OUR_DISPLAY), [players])
 
   // Our sell list: contracts ending 2026 (rentals — Section 4.6/4.8 mean no rights after this year),
   // excluding farm prospects (Minors deals stay controlled) and players no longer on our roster.
@@ -408,9 +217,9 @@ export default function DeadlinePage() {
     return [...seen.values()].sort((a, b) => (a.player?.rkOv ?? 99999) - (b.player?.rkOv ?? 99999))
   }, [salaries, playerByName])
 
-  // Near-term deals (ending 2027–28): not forced sales, but aging vets here are
-  // payroll-shedding candidates. Trading avoids §4.8 dead cap entirely (dropping
-  // costs 80% / 60% / 40% of AAV over three years).
+  // Near-term deals (ending 2027–28): aging vets here are payroll-shedding
+  // candidates. Trading avoids §4.8 dead cap entirely (dropping costs
+  // 80% / 60% / 40% of AAV over three years).
   const shedList = useMemo(() => {
     const seen = new Map<string, { entry: SalaryEntry; player: Player | null }>()
     for (const s of salaries) {
@@ -429,12 +238,9 @@ export default function DeadlinePage() {
   }, [salaries, playerByName])
 
   // Long-deal targets: players on OTHER rosters controlled through 2029+.
-  // The flip side of selling rentals — instead of only prospects back, a
-  // prime-age player locked up long-term is a legitimate ask. Resolved live
-  // from salaries.csv (still-rostered check via all.csv, like the sell list).
   const longDealList = useMemo(() => {
     const franchiseInfo = new Map<string, { team: string; code: string }>()
-    Object.entries(TEAM_INFO).forEach(([team, info]) => franchiseInfo.set(info.salaryFranchise, { team, code: info.code }))
+    Object.entries(TEAM_INFO).forEach(([team, info]) => franchiseInfo.set(info.salaryName, { team, code: info.code }))
     const seen = new Map<string, { entry: SalaryEntry; player: Player | null; team: string }>()
     for (const s of salaries) {
       if (s.franchise === OUR_SALARY_FRANCHISE) continue
@@ -479,23 +285,14 @@ export default function DeadlinePage() {
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">2026 Trade Deadline Plan</h1>
-        <p className="mt-2 text-sm text-gray-600 dark:text-gray-300 max-w-4xl">
-          We are <span className="font-semibold">sellers</span>. The plan: move players with <span className="font-semibold">no
-          control after 2026</span> — expiring FA deals, final-year YP contracts, and every in-season pickup (all in-season
-          contracts are 1-year, Constitution §4.6) — for <span className="font-semibold">young controlled MLB players, top
-          prospects, or a prime-age player already locked up on a long deal</span> (see the long-deal targets table below).
-          Beyond the rentals, aging vets on near-term deals (through 2027–28, e.g. Freeman) are
-          payroll-shedding candidates. Contract badges below are resolved live from salaries.csv, all.csv and
-          fv_rankings.csv: a red badge means the target’s contract also expires in 2026 and is worthless to acquire.
-          3-yr outlook columns are real FanGraphs ZiPS 2026 / 2027 / 2028 projections: wRC+ for hitters, ERA+ for pitchers (100 = league average, higher is better for both).
-        </p>
       </div>
 
       {/* Standings heatmap */}
       <section className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">Standings &amp; category points</h2>
         <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-          Cells are roto points per category (green = near the top of the category, red = near the bottom).
+          Cells are roto points per category (green = near the top of the category, red = near the bottom). Tiers are
+          computed from points vs ours (above by &gt;{BUBBLE_MARGIN} = buyer, within {BUBBLE_MARGIN} = bubble, at/below = seller).
           League-average games played: {Math.round(avgGP).toLocaleString()}.
         </p>
         <div className="overflow-x-auto">
@@ -515,14 +312,14 @@ export default function DeadlinePage() {
             </thead>
             <tbody>
               {sorted.map(row => {
-                const tier = TIERS[row.team]
+                const tier = computeTier(row, ourPoints)
                 const isUs = TEAM_INFO[row.team]?.code === OUR_CODE
                 return (
                   <tr key={row.team} className={`border-t border-gray-100 dark:border-gray-700 ${isUs ? 'bg-blue-50 dark:bg-blue-950' : ''}`}>
                     <td className="py-1 pr-2 font-medium text-gray-900 dark:text-white">{row.rank}</td>
                     <td className="py-1 pr-2 whitespace-nowrap font-medium text-gray-900 dark:text-white">{row.team}</td>
                     <td className="py-1 pr-2 whitespace-nowrap">
-                      {tier && <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${tier.cls}`}>{tier.label}</span>}
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${tier.cls}`}>{tier.label}</span>
                     </td>
                     <td className="py-1 pr-2 text-right font-semibold text-gray-900 dark:text-white">{row.points}</td>
                     <td className={`py-1 pr-2 text-right ${row.recentDelta > 0 ? 'text-green-600 dark:text-green-400' : row.recentDelta < 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400'}`}>
@@ -546,9 +343,8 @@ export default function DeadlinePage() {
       <section className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">Our sell list — everyone with no rights after 2026</h2>
         <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-          Computed from salaries.csv: our contracts ending 2026 that are still on the roster per all.csv. In-season pickups
-          (after {SEASON_START.toLocaleDateString()}) can never be kept regardless. There is zero reason to hold any of these
-          past the deadline — even a marginal farm prospect back beats letting them walk in October.
+          Our salaries.csv contracts ending 2026 that are still on the roster per all.csv. In-season pickups
+          (after {SEASON_START.toLocaleDateString()}) can never be kept (§4.6).
         </p>
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
@@ -597,10 +393,8 @@ export default function DeadlinePage() {
       <section className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">Payroll shed candidates — deals ending 2027–28</h2>
         <p className="text-xs text-gray-500 dark:text-gray-400 mb-3 max-w-4xl">
-          Not forced sales, but every dollar and roster spot here has an opportunity cost. Aging vets (Freeman is the
-          headline: elite AVG/OBP right now, but 36 with {fmtSalary(29_520_000)}/yr through 2028) are worth more to a
-          contender today than they will ever be to us — and trading avoids the §4.8 dead-cap hit entirely (dropping costs
-          80% / 60% / 40% of AAV over three years). Young core on this list is shown for completeness; keep unless blown away.
+          Verdicts are mechanical age bands (YP = keep, 34+ = shop, 30–33 = listen, under 30 = keep). Trading avoids the
+          §4.8 dead-cap hit (80% / 60% / 40% of AAV over three years). “Committed” = salary × seasons remaining including 2026.
         </p>
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
@@ -651,22 +445,15 @@ export default function DeadlinePage() {
             </tbody>
           </table>
         </div>
-        <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
-          Freeman fits the buyers who need batting rates: J.D. Barnett (AVG 8) and Ross &amp; Jack (AVG 7, OBP 5) — both
-          also need his cap-friendly production more than prospects they’d otherwise hoard. Injured arms (Burnes, Steele)
-          can’t be moved at value — hold and revisit in the offseason. “Committed” = salary × seasons remaining including 2026.
-        </p>
       </section>
 
       {/* Long-deal targets */}
       <section className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">Long-deal targets — controlled through 2029+ on other rosters</h2>
         <p className="text-xs text-gray-500 dark:text-gray-400 mb-3 max-w-4xl">
-          The other side of selling: instead of only prospects back, a prime-age player already locked up long-term is a
-          legitimate ask — no FA bidding war, no prospect bust risk. We have the cap room to absorb one:
-          committed payroll {fmtSalary(capRoom[2027].committed)} of {fmtSalary(capRoom[2027].cap)} in 2027
+          Our committed payroll: {fmtSalary(capRoom[2027].committed)} of {fmtSalary(capRoom[2027].cap)} in 2027
           and {fmtSalary(capRoom[2028].committed)} of {fmtSalary(capRoom[2028].cap)} in 2028 (excl. dead cap).
-          Buyers can be paid with our rentals; seller-owned players here would need prospects going back instead.
+          Verdicts are mechanical rank + age bands. “Committed” = sum of remaining salary hits from 2026 on.
         </p>
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
@@ -687,7 +474,8 @@ export default function DeadlinePage() {
             </thead>
             <tbody>
               {longDealList.map(({ entry, player, team }) => {
-                const tier = TIERS[team]
+                const row = sorted.find(r => r.team === team)
+                const tier = row ? computeTier(row, ourPoints) : null
                 const age = player?.age ?? null
                 const rk = player?.rkOv ?? null
                 const committed = Object.entries(entry.salaryByYear).reduce(
@@ -729,126 +517,248 @@ export default function DeadlinePage() {
             </tbody>
           </table>
         </div>
-        <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
-          “Committed” = sum of remaining salary hits from 2026 on. Verdicts are mechanical (rank + age bands) — a green
-          badge means “open the conversation,” not “pay anything.” The salary going back matters too: taking on a big deal
-          is itself part of the price, so a buyer shedding one of these may accept a lighter prospect package.
-        </p>
       </section>
+
+      {/* Acquisition targets: young players, prospects, buy-low */}
+      <TargetsSection players={players} />
 
       {/* Deal sheets */}
       <section>
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">Deal sheets — buyers in priority order</h2>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">Deal sheets — engine-suggested trades, every franchise</h2>
         <p className="text-xs text-gray-500 dark:text-gray-400 mb-4 max-w-4xl">
-          Weakest categories are computed from the standings; position needs and asks come from roster analysis (July 2026).
-          Rival sellers to beat to market: E.T. Phone Holmes and Max Mastbaum &amp; co — Mastbaum’s Sale/Sánchez/Gilbert
-          surplus competes directly with our pitching rentals.
+          All computed, with positions fully factored in: every delta re-optimizes the whole 23-man lineup — displaced
+          starters slide to other eligible slots (SS→MI, 1B→CI, LF→OF/UTIL) with bench fills behind them — and diffs
+          roto points vs the team&#39;s baseline optimal lineup. Sends = our tradeable players (sell list + 30+ shed
+          vets), ranked by what <em>their</em> re-optimized lineup gains, with the slot they&#39;d start at. Asks =
+          their controlled dynasty assets by HKB value, with the roto points their re-optimized lineup loses without
+          each. The suggested deal is the highest-HKB ask that a ≤3-player send package both covers win-now (joint roto
+          gain beats their cost with margin) and affords in dynasty terms (ask HKB ≤ 250 × package roto gain); packages
+          are verified with one joint re-optimization per side, so overlapping positions don&#39;t double-count.
         </p>
-        <div className="space-y-4">
-          {BUYER_PLANS.map(plan => {
-            const info = TEAM_INFO[plan.team]
-            const st = standingsByTeam.get(plan.team)
-            const weakest = st
-              ? SCORED_CATS
-                  .map(c => ({ cat: c, pts: st.categoryPoints[c] }))
+        {engine.sheets.size === 0 ? (
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 text-center text-sm text-gray-500 dark:text-gray-400">
+            No RoS projection data loaded — upload <code>zips_dc_ros_advanced_*.csv</code> on the Upload page to power the trade engine.
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {sorted
+              .filter(row => TEAM_INFO[row.team] && TEAM_INFO[row.team].code !== OUR_CODE)
+              .map(row => {
+                const info = TEAM_INFO[row.team]
+                const sheet = engine.sheets.get(info.displayName)
+                const tier = computeTier(row, ourPoints)
+                const weakest = SCORED_CATS
+                  .map(c => ({ cat: c, pts: row.categoryPoints[c] }))
                   .filter((x): x is { cat: string; pts: number } => x.pts !== null && x.pts !== undefined)
                   .sort((a, b) => a.pts - b.pts)
                   .slice(0, 5)
-              : []
-            const targets = plan.targets.map(t =>
-              resolveTarget(t, info.salaryFranchise, info.code, salaryByName, playerByName, fvByName)
-            )
-            return (
-              <div key={plan.team} className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
-                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                  <h3 className="text-base font-bold text-gray-900 dark:text-white">{plan.team}</h3>
-                  {st && (
-                    <span className="text-xs text-gray-500 dark:text-gray-400">
-                      #{st.rank} · {st.points} pts · {st.recentDelta > 0 ? `+${st.recentDelta}` : st.recentDelta} recent · {st.gamesPlayed.toLocaleString()} GP
-                    </span>
-                  )}
-                  <span className="text-xs font-semibold text-blue-600 dark:text-blue-400">{plan.headline}</span>
-                </div>
-
-                {weakest.length > 0 && (
-                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                    <span className="text-[11px] uppercase tracking-wide text-gray-400 dark:text-gray-500">Weakest cats:</span>
-                    {weakest.map(w => (
-                      <span key={w.cat} className="px-1.5 py-0.5 rounded text-[11px] font-semibold bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300">
-                        {w.cat} · {w.pts}
-                      </span>
-                    ))}
-                  </div>
-                )}
-
-                <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">{plan.rationale}</p>
-                <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
-                  <span className="font-semibold text-gray-800 dark:text-gray-100">Position needs:</span> {plan.positionNeeds}
-                </p>
-                <p className="mt-1 text-sm text-gray-800 dark:text-gray-100">
-                  <span className="font-semibold">We send:</span> {plan.send}
-                </p>
-
-                <div className="mt-3 overflow-x-auto">
-                  <table className="min-w-full text-sm">
-                    <thead>
-                      <tr className="text-left text-gray-500 dark:text-gray-400 text-xs">
-                        <th className="py-1 pr-3">Ask</th>
-                        <th className="py-1 pr-3">Pos</th>
-                        <th className="py-1 pr-3 text-right">Age</th>
-                        <th className="py-1 pr-3 text-right">Rank</th>
-                        <th className="py-1 pr-3">Prospect</th>
-                        <th className="py-1 pr-3">3-yr wRC+ / ERA+ ’26→’28</th>
-                        <th className="py-1 pr-3">Contract</th>
-                        <th className="py-1 pr-3">Note</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {targets.map(t => (
-                        <tr key={t.name} className="border-t border-gray-100 dark:border-gray-700">
-                          <td className="py-1.5 pr-3 font-medium text-gray-900 dark:text-white whitespace-nowrap">{t.name}</td>
-                          <td className="py-1.5 pr-3 text-gray-600 dark:text-gray-300 whitespace-nowrap">{t.position || '—'}</td>
-                          <td className="py-1.5 pr-3 text-right text-gray-600 dark:text-gray-300">{t.age ?? '—'}</td>
-                          <td className="py-1.5 pr-3 text-right text-gray-600 dark:text-gray-300">{t.rkOv ? `#${t.rkOv}` : '—'}</td>
-                          <td className="py-1.5 pr-3 text-gray-600 dark:text-gray-300 whitespace-nowrap">
-                            {t.fv ? `FV ${t.fv.fv} · FG #${t.fv.rank}${t.fv.eta ? ` · ETA ${t.fv.eta}` : ''}` : '—'}
-                          </td>
-                          <td className="py-1.5 pr-3 text-xs">
-                            <OutlookCell o={threeYearOutlook(t.name, zips26, zips27, zips28)} />
-                          </td>
-                          <td className="py-1.5 pr-3 whitespace-nowrap">
-                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${BADGE_CLS[t.badge.tone]}`}>{t.badge.text}</span>
-                          </td>
-                          <td className="py-1.5 pr-3 text-gray-600 dark:text-gray-300">{t.note}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )
-          })}
-        </div>
+                return (
+                  <DealSheetCard
+                    key={row.team}
+                    row={row}
+                    tier={tier}
+                    weakest={weakest}
+                    sheet={sheet ?? null}
+                    zips26={zips26}
+                    zips27={zips27}
+                    zips28={zips28}
+                  />
+                )
+              })}
+          </div>
+        )}
       </section>
+    </div>
+  )
+}
 
-      {/* Footnotes */}
-      <section className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
-        <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-2">Vetted and ruled out</h2>
-        <ul className="list-disc list-inside text-sm text-gray-600 dark:text-gray-300 space-y-1">
-          {RULED_OUT.map(r => (
-            <li key={r}>{r}</li>
+// ============================================================
+// Deal sheet card
+// ============================================================
+
+function DealSheetCard({
+  row, tier, weakest, sheet, zips26, zips27, zips28,
+}: {
+  row: LeagueStanding
+  tier: { label: string; cls: string }
+  weakest: { cat: string; pts: number }[]
+  sheet: DealSheet | null
+  zips26: ZipsYearMaps
+  zips27: ZipsYearMaps
+  zips28: ZipsYearMaps
+}) {
+  const isSeller = tier.label === 'Seller'
+  const sends = sheet?.sends.slice(0, 6) ?? []
+  const asks = sheet?.asks ?? []
+  // A seller has no use for win-now roto — the rental-package suggestion only
+  // makes sense for teams still chasing points.
+  const sug = isSeller ? null : sheet?.suggestion ?? null
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h3 className="text-base font-bold text-gray-900 dark:text-white">{row.team}</h3>
+        <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${tier.cls}`}>{tier.label}</span>
+        <span className="text-xs text-gray-500 dark:text-gray-400">
+          #{row.rank} · {row.points} pts · {row.recentDelta > 0 ? `+${row.recentDelta}` : row.recentDelta} recent · {row.gamesPlayed.toLocaleString()} GP
+        </span>
+        {sheet && (
+          <span className="text-xs text-gray-500 dark:text-gray-400">
+            RoS roto: #{sheet.rosRotoRank} · {sheet.rosRotoTotal} pts
+          </span>
+        )}
+      </div>
+
+      {weakest.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] uppercase tracking-wide text-gray-400 dark:text-gray-500">Weakest cats:</span>
+          {weakest.map(w => (
+            <span key={w.cat} className="px-1.5 py-0.5 rounded text-[11px] font-semibold bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300">
+              {w.cat} · {w.pts}
+            </span>
           ))}
-        </ul>
+        </div>
+      )}
+
+      {sheet && sheet.holes.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] uppercase tracking-wide text-gray-400 dark:text-gray-500">Lineup holes:</span>
+          {sheet.holes.map(h => (
+            <span key={h.slot + h.detail} className="px-1.5 py-0.5 rounded text-[11px] font-semibold bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300">
+              {h.slot} — {h.detail}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Suggested deal */}
+      {sug ? (
+        <div className="mt-3 rounded-lg border border-blue-200 dark:border-blue-900 bg-blue-50/60 dark:bg-blue-950/40 px-3 py-2">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+            <span className="text-[11px] uppercase tracking-wide font-semibold text-blue-600 dark:text-blue-400">Suggested deal</span>
+            <span className="font-medium text-gray-900 dark:text-white">
+              {sug.sends.map(s => s.player.name).join(' + ')}
+            </span>
+            <span className="text-gray-400">⇄</span>
+            <span className="font-medium text-gray-900 dark:text-white">{sug.ask.player.name}</span>
+          </div>
+          <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-600 dark:text-gray-300">
+            <span>They: <DeltaCell v={sug.buyerNet} /> roto now</span>
+            <span>We: <DeltaCell v={sug.ourRotoDelta} /> roto now</span>
+            <span>
+              HKB net{' '}
+              <span className={`font-bold tabular-nums ${sug.hkbNet > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
+                {sug.hkbNet > 0 ? `+${sug.hkbNet}` : sug.hkbNet}
+              </span>
+              {sug.ask.player.hkbRank && <span className="text-gray-400"> (they send HKB #{sug.ask.player.hkbRank})</span>}
+            </span>
+          </div>
+        </div>
+      ) : sheet && isSeller ? (
         <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
-          Method: standings cells are Fantrax roto category points (rank-based), so margins within a category are not
-          visible here — treat “gettable” categories as directional. Buyer/seller tiers, position needs and asks reflect
-          the July 10, 2026 snapshot; contract badges re-resolve automatically whenever salaries.csv or all.csv are
-          refreshed on the Upload page. 3-yr outlook = real FanGraphs ZiPS projections for 2026, 2027 and 2028 (zips_2027_*.csv /
-          zips_2028_*.csv). Hitters: ZiPS wRC+ (min 50 PA). Pitchers: ERA+ = that projection year’s IP-weighted
-          league-average ERA ÷ player ERA × 100 (min 20 IP) — the ZiPS export has no xFIP column, so ERA+ is computed
-          in-house. Both metrics: 100 = league average, higher = better. “—” = not projected that year.
+          Seller — win-now sends have little value here; their asks are listed for reference (prospect-for-prospect only).
         </p>
-      </section>
+      ) : sheet ? (
+        <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+          No balanced package: no listed ask is both covered win-now and affordable in HKB terms by what our sends add.
+        </p>
+      ) : (
+        <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">No RoS roster data for this franchise.</p>
+      )}
+
+      {/* We send */}
+      {sends.length > 0 && (
+        <div className="mt-3 overflow-x-auto">
+          <div className="text-[11px] uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-1">We send — by roto gain to their lineup</div>
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="text-left text-gray-500 dark:text-gray-400 text-xs">
+                <th className="py-1 pr-3">Player</th>
+                <th className="py-1 pr-3">Pos</th>
+                <th className="py-1 pr-3 text-right">Age</th>
+                <th className="py-1 pr-3">Contract</th>
+                <th className="py-1 pr-3 text-right">RoS FPTS</th>
+                <th className="py-1 pr-3 text-right">Their Δ</th>
+                <th className="py-1 pr-3">Starts at</th>
+                <th className="py-1 pr-3">Displaces</th>
+                <th className="py-1 pr-3 text-right">Our cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sends.map((s: SendCandidate) => (
+                <tr key={s.player.id} className="border-t border-gray-100 dark:border-gray-700">
+                  <td className="py-1.5 pr-3 font-medium text-gray-900 dark:text-white whitespace-nowrap">{s.player.name}</td>
+                  <td className="py-1.5 pr-3 text-gray-600 dark:text-gray-300 whitespace-nowrap">{s.player.position}</td>
+                  <td className="py-1.5 pr-3 text-right text-gray-600 dark:text-gray-300">{s.player.age ?? '—'}</td>
+                  <td className="py-1.5 pr-3 text-xs text-gray-600 dark:text-gray-300 whitespace-nowrap">{sendContract(s.player)}</td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums text-gray-600 dark:text-gray-300">{s.player.zipsRosProjection ? s.player.zipsRosProjection.fpts.toFixed(0) : '—'}</td>
+                  <td className="py-1.5 pr-3 text-right"><DeltaCell v={s.deltaToThem} /></td>
+                  <td className="py-1.5 pr-3 text-xs text-gray-600 dark:text-gray-300 whitespace-nowrap">
+                    {s.startsAt ? s.startsAt.replace(/^P\d+$/, 'P') : "doesn't start"}
+                  </td>
+                  <td className="py-1.5 pr-3 text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                    {s.startsAt ? (s.replaces ?? '(fills empty slot)') : '—'}
+                  </td>
+                  <td className="py-1.5 pr-3 text-right"><DeltaCell v={-s.ourCost} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* We ask — HKB first, then RoS */}
+      {asks.length > 0 && (
+        <div className="mt-3 overflow-x-auto">
+          <div className="text-[11px] uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-1">We ask — their controlled assets by HKB value</div>
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="text-left text-gray-500 dark:text-gray-400 text-xs">
+                <th className="py-1 pr-3">Player</th>
+                <th className="py-1 pr-3">Pos</th>
+                <th className="py-1 pr-3 text-right">Age</th>
+                <th className="py-1 pr-3 text-right">HKB Rk</th>
+                <th className="py-1 pr-3 text-right">HKB Val</th>
+                <th className="py-1 pr-3">Prospect</th>
+                <th className="py-1 pr-3 text-right">RoS FPTS</th>
+                <th className="py-1 pr-3">3-yr ’26→’28</th>
+                <th className="py-1 pr-3">Contract</th>
+                <th className="py-1 pr-3 text-right">Cost to them</th>
+              </tr>
+            </thead>
+            <tbody>
+              {asks.map((a: AskCandidate) => {
+                const badge = askBadge(a.player)
+                return (
+                  <tr key={a.player.id} className="border-t border-gray-100 dark:border-gray-700">
+                    <td className="py-1.5 pr-3 font-medium text-gray-900 dark:text-white whitespace-nowrap">{a.player.name}</td>
+                    <td className="py-1.5 pr-3 text-gray-600 dark:text-gray-300 whitespace-nowrap">{a.player.position}</td>
+                    <td className="py-1.5 pr-3 text-right text-gray-600 dark:text-gray-300">{a.player.age ?? '—'}</td>
+                    <td className="py-1.5 pr-3 text-right tabular-nums text-gray-600 dark:text-gray-300">{a.player.hkbRank ? `#${a.player.hkbRank}` : '—'}</td>
+                    <td className="py-1.5 pr-3 text-right tabular-nums font-semibold text-gray-900 dark:text-white">{a.player.hkbValue ?? '—'}</td>
+                    <td className="py-1.5 pr-3 text-xs text-gray-600 dark:text-gray-300 whitespace-nowrap">
+                      {a.player.fvGrade ? `FV ${a.player.fvGrade} · FG #${a.player.fvRank}${a.player.fvETA ? ` · ETA ${a.player.fvETA}` : ''}` : '—'}
+                    </td>
+                    <td className="py-1.5 pr-3 text-right tabular-nums text-gray-600 dark:text-gray-300">
+                      {a.player.zipsRosProjection ? a.player.zipsRosProjection.fpts.toFixed(0) : '—'}
+                    </td>
+                    <td className="py-1.5 pr-3 text-xs">
+                      <OutlookCell o={threeYearOutlook(a.player.name, zips26, zips27, zips28)} />
+                    </td>
+                    <td className="py-1.5 pr-3 whitespace-nowrap">
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${BADGE_CLS[badge.tone]}`}>{badge.text}</span>
+                    </td>
+                    <td className="py-1.5 pr-3 text-right">
+                      {a.costToThem === 0
+                        ? <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">free now</span>
+                        : <DeltaCell v={-a.costToThem} />}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   )
 }

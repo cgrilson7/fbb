@@ -38,7 +38,7 @@ function topLevel(level: string): string {
 }
 
 export default function ProspectsPage() {
-  const { fgMinorsBatters, fgMinorsPitchers, players, hkbPlayers, fvRankings, prospectRankings, franchiseMappings } = usePlayerStore()
+  const { fgMinorsBatters, fgMinorsPitchers, players, hkbPlayers, fvRankings, prospectRankings, franchiseMappings, mlbDebuted } = usePlayerStore()
   const hasHydrated = useHydration()
   const [search, setSearch] = useState('')
   const [prospectType, setProspectType] = useState<ProspectType>('all')
@@ -52,11 +52,15 @@ export default function ProspectsPage() {
   const [sortField, setSortField] = useState<SortField>('wrcPlus')
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
 
+  // Anyone with an MLB appearance (ever) is no longer a prospect — this drops
+  // both past debuts and MLB vets on rehab assignments. Exact FG PlayerId match.
+  const debutedIds = useMemo(() => new Set(mlbDebuted.map(d => d.playerId)), [mlbDebuted])
+
   const enrichedProspects = useMemo(() => {
     const allProspects = [
       ...fgMinorsBatters.map(p => ({ ...p, type: 'batting' as const })),
       ...fgMinorsPitchers.map(p => ({ ...p, type: 'pitching' as const }))
-    ]
+    ].filter(p => !debutedIds.has(p.playerId))
 
     const playerMap = new Map(players.map(p => [p.normalizedName, p]))
     const hkbMap = new Map(hkbPlayers.map(p => [p.normalizedName, p]))
@@ -95,7 +99,7 @@ export default function ProspectsPage() {
         rankTrend,
       }
     })
-  }, [fgMinorsBatters, fgMinorsPitchers, players, hkbPlayers, fvRankings, prospectRankings, franchiseMappings])
+  }, [fgMinorsBatters, fgMinorsPitchers, debutedIds, players, hkbPlayers, fvRankings, prospectRankings, franchiseMappings])
 
   const levels = useMemo(() => {
     const allLevels = new Set(enrichedProspects.map(p => p.currentLevel).filter(Boolean))
@@ -275,7 +279,14 @@ export default function ProspectsPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">MiLB Stats</h1>
-        <span className="text-sm text-gray-500 dark:text-gray-400">{filteredProspects.length.toLocaleString()} players</span>
+        <span className="text-sm text-gray-500 dark:text-gray-400">
+          {filteredProspects.length.toLocaleString()} players
+          {mlbDebuted.length > 0 && (
+            <span title="Anyone with an MLB appearance (any year) is excluded via mlb_debuted.csv — including vets on rehab assignments">
+              {' '}· {(fgMinorsBatters.length + fgMinorsPitchers.length - enrichedProspects.length).toLocaleString()} MLB-debuted hidden
+            </span>
+          )}
+        </span>
       </div>
 
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">

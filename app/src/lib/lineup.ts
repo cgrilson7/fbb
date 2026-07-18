@@ -55,10 +55,15 @@ export function getBasePositions(posStr: string): string[] {
     if ((BASE_POSITIONS as readonly string[]).includes(p)) result.add(p)
     if (p === 'MI') { result.add('SS'); result.add('2B') }
     if (p === 'CI') { result.add('1B'); result.add('3B') }
-    if (p === 'OF') { result.add('LF'); result.add('CF'); result.add('RF') }
     if (p === 'DH' || p === 'UTIL') {
       result.add('DH')
     }
+  }
+  // Fantrax lists specific OF spots (LF/CF/RF) plus a generic ",OF" group tag.
+  // A "CF,OF" player is NOT LF/RF-eligible — only expand the generic tag for
+  // the rare player with no specific OF position listed.
+  if (raw.includes('OF') && !raw.some(p => p === 'LF' || p === 'CF' || p === 'RF')) {
+    result.add('LF'); result.add('CF'); result.add('RF')
   }
   return Array.from(result)
 }
@@ -67,7 +72,7 @@ export function getBasePositions(posStr: string): string[] {
 export function getPrimaryPosition(posStr: string): string {
   const positions = posStr.split(',').map(p => p.trim())
   if (positions.includes('SP')) return 'SP'
-  if (positions.includes('RP')) return 'RP'
+  if (positions.includes('RP') || positions.includes('P')) return 'RP'
   for (const fp of BASE_POSITIONS) {
     if (positions.includes(fp)) return fp
   }
@@ -76,6 +81,12 @@ export function getPrimaryPosition(posStr: string): string {
   if (positions.includes('OF')) return 'LF'
   if (positions.includes('UTIL') || positions.includes('DH')) return 'DH'
   return 'DH'
+}
+
+// Fantrax pitcher tokens — a bare "P" appears on ~60 unclassified arms
+export function isPitcherPos(posStr: string): boolean {
+  const positions = posStr.split(',').map(p => p.trim())
+  return positions.includes('SP') || positions.includes('RP') || positions.includes('P')
 }
 
 // Check if a player is eligible for a lineup slot
@@ -197,7 +208,7 @@ export function toLineupPlayer(p: {
   if (value === null || value === undefined) return null
   const posStr = p.position
   const positions = posStr.split(',').map(s => s.trim())
-  const isPitcher = positions.includes('SP') || positions.includes('RP')
+  const isPitcher = positions.includes('SP') || positions.includes('RP') || positions.includes('P')
   return {
     name: p.name,
     value,

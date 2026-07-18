@@ -33,6 +33,7 @@ const fileTypes: { type: FileType; label: string; description: string }[] = [
   { type: 'closers', label: 'closers.csv', description: 'Closer depth charts (closermonkey.com)' },
   { type: 'fgMinorsBatters', label: 'fangraphs_minors_batters.csv', description: 'FanGraphs MiLB batting stats' },
   { type: 'fgMinorsPitchers', label: 'fangraphs_minors_pitchers.csv', description: 'FanGraphs MiLB pitching stats' },
+  { type: 'mlbDebuted', label: 'mlb_debuted.csv', description: 'FG ids of players with any MLB appearance (excludes them from Prospects)' },
 ]
 
 // Map file types to store state keys
@@ -61,6 +62,7 @@ const storeKeyMap: Record<FileType, string> = {
   closermonkey: 'closerMonkey',
   fgMinorsBatters: 'fgMinorsBatters',
   fgMinorsPitchers: 'fgMinorsPitchers',
+  mlbDebuted: 'mlbDebuted',
 }
 
 export default function UploadPage() {
@@ -89,10 +91,11 @@ export default function UploadPage() {
     closermonkey: { type: 'closermonkey', status: 'pending' },
     fgMinorsBatters: { type: 'fgMinorsBatters', status: 'pending' },
     fgMinorsPitchers: { type: 'fgMinorsPitchers', status: 'pending' },
+    mlbDebuted: { type: 'mlbDebuted', status: 'pending' },
   })
 
   const store = usePlayerStore()
-  const { setPlayers, setHKB, setSalaries, setBattingProspects, setPitchingProspects, setZipsBatters, setZipsPitchers, setZipsDcBatters, setZipsDcPitchers, setZipsRosBatters, setZipsRosPitchers, setFreeAgentEntries, setFVRankings, setProspectRankings, setStandings, setZips27Batters, setZips27Pitchers, setZips28Batters, setZips28Pitchers, setFPRankings, setClosers, setCloserMonkey, joinData } = store
+  const { setPlayers, setHKB, setSalaries, setBattingProspects, setPitchingProspects, setZipsBatters, setZipsPitchers, setZipsDcBatters, setZipsDcPitchers, setZipsRosBatters, setZipsRosPitchers, setFreeAgentEntries, setFVRankings, setProspectRankings, setStandings, setZips27Batters, setZips27Pitchers, setZips28Batters, setZips28Pitchers, setFPRankings, setClosers, setCloserMonkey, setMLBDebuted, joinData } = store
   const hasHydrated = useHydration()
 
   const [isJoining, setIsJoining] = useState(false)
@@ -219,6 +222,9 @@ export default function UploadPage() {
             break
           case 'closermonkey':
             setCloserMonkey(data)
+            break
+          case 'mlbDebuted':
+            setMLBDebuted(data)
             break
         }
 

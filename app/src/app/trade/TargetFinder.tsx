@@ -41,7 +41,7 @@ export default function TargetFinder({ players, baseStandings, myFranchise }: {
       if (p.isAvailable) return null
       const proj = p.zipsRosProjection
       const positions = p.position.split(',').map(s => s.trim())
-      const isPitcher = positions.includes('SP') || positions.includes('RP')
+      const isPitcher = positions.includes('SP') || positions.includes('RP') || positions.includes('P')
       const candLP: LineupPlayer = { name: p.name, value: proj.fpts, isFarm: false, basePositions: getBasePositions(p.position), isPitcher, pitcherType: null }
       const slots = (isPitcher ? PITCHER_SLOTS : POS_SLOTS).filter(s => isPitcher || isEligibleForSlot(candLP, s))
       if (slots.length === 0) return null

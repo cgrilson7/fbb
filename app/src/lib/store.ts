@@ -21,30 +21,19 @@ import type {
   CloserMonkeyEntry,
   FGMinorsBatter,
   FGMinorsPitcher,
+  MLBDebutedEntry,
   ProspectRanking,
   LeagueStanding
 } from '@/types'
 import { normalize } from './normalize'
 import { idbStorage } from './idb-storage'
+import { FRANCHISES } from './franchises'
+import { assignEntries, assignSalaries } from './playerMatch'
 
-// Default franchise mappings
+// Default franchise mappings — derived from the canonical table in
+// franchises.ts (verified by roster-name overlap; see that file)
 const DEFAULT_FRANCHISE_MAPPINGS: FranchiseMapping[] = [
-  { shortCode: 'C&G', fullName: 'Colin Wilson & Greg Holmes', confirmed: true },
-  { shortCode: 'B&A', fullName: 'Ben Brody & Aaron', confirmed: true },
-  { shortCode: 'R&J', fullName: 'Ross & Jack Kantor', confirmed: true },
-  { shortCode: 'J&A', fullName: 'Jake Zuckman & Andrew Meyers', confirmed: true },
-  { shortCode: 'T', fullName: 'Tyler Hart', confirmed: true },
-  // Verified vs salaries.csv/free_agency.csv: "Max" rosters Sale/Devers/Rooker (the
-  // Mastbaum group's players) and "ELLY" rosters Elly De La Cruz/PCA (Dustin & Wamp's)
-  { shortCode: 'Max', fullName: 'Max Mastbaum, Jake Mastbaum & Sam Elias', confirmed: true },
-  { shortCode: 'Kai', fullName: 'Kai Nelson', confirmed: true },
-  { shortCode: 'Ethan', fullName: 'Ethan Gobetz', confirmed: true },
-  { shortCode: 'Steve', fullName: 'Steve Cornish', confirmed: true },
-  { shortCode: 'Zack', fullName: 'Zack Semler', confirmed: true },
-  { shortCode: 'JD', fullName: 'JD Barnett', confirmed: true },
-  { shortCode: 'Brian', fullName: 'Brian Frederick', confirmed: true },
-  { shortCode: 'Brenden', fullName: 'Brenden Freedman', confirmed: true },
-  { shortCode: 'ELLY', fullName: 'Dustin Hart & Max Wamp', confirmed: true },
+  ...FRANCHISES.map(f => ({ shortCode: f.code, fullName: f.displayName, confirmed: true })),
   { shortCode: 'FA', fullName: 'Free Agent', confirmed: true },
 ]
 
@@ -77,6 +66,7 @@ interface PlayerStore {
   closerMonkey: CloserMonkeyEntry[]
   fgMinorsBatters: FGMinorsBatter[]
   fgMinorsPitchers: FGMinorsPitcher[]
+  mlbDebuted: MLBDebutedEntry[]
 
   // Joined data
   players: Player[]
@@ -133,6 +123,7 @@ interface PlayerStore {
   setCloserMonkey: (entries: CloserMonkeyEntry[]) => void
   setFGMinorsBatters: (batters: FGMinorsBatter[]) => void
   setFGMinorsPitchers: (pitchers: FGMinorsPitcher[]) => void
+  setMLBDebuted: (entries: MLBDebutedEntry[]) => void
 
   // Join data from all sources
   joinData: () => void
@@ -189,6 +180,7 @@ export const usePlayerStore = create<PlayerStore>()(
       closerMonkey: [],
       fgMinorsBatters: [],
       fgMinorsPitchers: [],
+      mlbDebuted: [],
       players: [],
       salaryReliefDesignations: [],
       poolDrafted: [],
@@ -228,25 +220,14 @@ export const usePlayerStore = create<PlayerStore>()(
       setCloserMonkey: (entries) => set({ closerMonkey: entries }),
       setFGMinorsBatters: (batters) => set({ fgMinorsBatters: batters }),
       setFGMinorsPitchers: (pitchers) => set({ fgMinorsPitchers: pitchers }),
+      setMLBDebuted: (entries) => set({ mlbDebuted: entries }),
 
       // Join data from all sources
       joinData: () => {
         const state = get()
-        const { rawPlayers, hkbPlayers, salaries, battingProspects, pitchingProspects, zipsBatters, zipsPitchers, zipsDcBatters, zipsDcPitchers, zipsRosBatters, zipsRosPitchers, fvRankings, fpRankings, nameMappings, franchiseMappings } = state
+        const { rawPlayers, hkbPlayers, salaries, battingProspects, pitchingProspects, zipsBatters, zipsPitchers, zipsDcBatters, zipsDcPitchers, zipsRosBatters, zipsRosPitchers, fvRankings, fpRankings, nameMappings, franchiseMappings, mlbDebuted } = state
 
         // Create lookup maps
-        const hkbMap = new Map<string, HKBPlayer>()
-        hkbPlayers.forEach(p => hkbMap.set(p.normalizedName, p))
-
-        const salaryMap = new Map<string, SalaryEntry>()
-        salaries.forEach(s => salaryMap.set(s.normalizedName, s))
-
-        const battingMap = new Map<string, BattingProspect>()
-        battingProspects.forEach(p => battingMap.set(p.normalizedName, p))
-
-        const pitchingMap = new Map<string, PitchingProspect>()
-        pitchingProspects.forEach(p => pitchingMap.set(p.normalizedName, p))
-
         const zipsBatterMap = new Map<string, ZipsBatter>()
         zipsBatters.forEach(p => zipsBatterMap.set(p.normalizedName, p))
 
@@ -265,19 +246,37 @@ export const usePlayerStore = create<PlayerStore>()(
         const zipsRosPitcherMap = new Map<string, ZipsPitcher>()
         zipsRosPitchers.forEach(p => zipsRosPitcherMap.set(p.normalizedName, p))
 
-        const fvRankingMap = new Map<string, FVRanking>()
-        fvRankings.forEach(p => fvRankingMap.set(p.normalizedName, p))
-
-        const fpRankingMap = new Map<string, FantasyProsRanking>()
-        fpRankings.forEach(p => fpRankingMap.set(p.normalizedName, p))
-
         // Apply user name mappings
         const nameMap = new Map<string, string>()
         nameMappings.forEach(m => nameMap.set(normalize(m.source), normalize(m.target)))
 
+        // Collision-aware source→player assignments (see playerMatch.ts):
+        // each HKB/salary/prospect/ranking row attaches to at most one player,
+        // picked by role/team/age (or contract owner for salaries), so
+        // same-name players (two Jared Joneses, two Max Muncys) no longer
+        // share the same row.
+        const matchable = rawPlayers.map(p => ({
+          id: p.id,
+          normalizedName: nameMap.get(p.normalizedName) ?? p.normalizedName,
+          team: p.team,
+          position: p.position,
+          age: p.age,
+          status: p.status,
+        }))
+        const hkbAssign = assignEntries(matchable, hkbPlayers, e => ({ team: e.team, positions: e.positions, age: e.age }))
+        const salaryAssign = assignSalaries(matchable, salaries)
+        const battingAssign = assignEntries(matchable, battingProspects, e => ({ team: e.team, age: e.age, positions: 'UT' }))
+        const pitchingAssign = assignEntries(matchable, pitchingProspects, e => ({ team: e.team, age: e.age, positions: 'P' }))
+        const fvAssign = assignEntries(matchable, fvRankings, e => ({ team: e.team, positions: e.position, age: e.age }))
+        const fpAssign = assignEntries(matchable, fpRankings, e => ({ team: e.team, positions: e.pos, age: e.age }))
+
         // Franchise lookup
         const franchiseMap = new Map<string, string>()
         franchiseMappings.forEach(m => franchiseMap.set(m.shortCode, m.fullName))
+
+        // Players who have actually debuted in MLB (scraped from FanGraphs).
+        // HKB levels go stale after call-ups, so this overrides them.
+        const debutedNames = new Set(mlbDebuted.map(e => normalize(e.name)))
 
         const unmatched: UnmatchedPlayer[] = []
 
@@ -290,21 +289,25 @@ export const usePlayerStore = create<PlayerStore>()(
           }
 
           // HKB data
-          const hkb = hkbMap.get(normalizedName)
+          const hkb = hkbAssign.get(player.id)
           const hkbRank = hkb?.rank ?? null
           const hkbValue = hkb?.value ?? null
-          const hkbLevel = hkb?.level ?? null
+          // isFarm is derived from hkbLevel !== 'MLB' across the app; a stale
+          // minors level on a player who has debuted would wrongly bench him
+          const hkbLevelRaw = hkb?.level ?? null
+          const hkbLevel = hkbLevelRaw !== null && hkbLevelRaw !== 'MLB' && debutedNames.has(normalizedName) ? 'MLB' : hkbLevelRaw
 
           // Salary data
-          const salary = salaryMap.get(normalizedName)
+          const salary = salaryAssign.get(player.id)
           const franchise = franchiseMap.get(player.status) || player.status
           const contractType = salary?.contractType ?? null
           const contractLength = salary?.contractLength ?? null
+          const contractEnds = salary?.contractEnds || null
           const salaryByYear = salary?.salaryByYear ?? {}
 
           // Prospect data
-          const batting = battingMap.get(normalizedName)
-          const pitching = pitchingMap.get(normalizedName)
+          const batting = battingAssign.get(player.id)
+          const pitching = pitchingAssign.get(player.id)
           const prospect = batting || pitching
           const prospectRank = prospect?.rank ?? null
           const prospectLevel = prospect?.level ?? null
@@ -344,7 +347,7 @@ export const usePlayerStore = create<PlayerStore>()(
           // actual role so same-name batter/pitcher collisions (e.g. star 3B
           // "José Ramírez" vs a reliever of the same name) don't cross over.
           const projPositions = player.position.split(',').map(s => s.trim())
-          const playerIsPitcher = projPositions.includes('SP') || projPositions.includes('RP')
+          const playerIsPitcher = projPositions.includes('SP') || projPositions.includes('RP') || projPositions.includes('P')
           const buildProjection = (bMap: Map<string, ZipsBatter>, pMap: Map<string, ZipsPitcher>): ZipsProjection | null => {
             const b = playerIsPitcher ? undefined : bMap.get(normalizedName)
             const p = playerIsPitcher ? pMap.get(normalizedName) : undefined
@@ -374,12 +377,12 @@ export const usePlayerStore = create<PlayerStore>()(
           const zipsRosProjection = buildProjection(zipsRosBatterMap, zipsRosPitcherMap)
 
           // FantasyPros ranking data
-          const fpRanking = fpRankingMap.get(normalizedName)
+          const fpRanking = fpAssign.get(player.id)
           const fpRank = fpRanking?.rank ?? null
           const fpPos = fpRanking?.pos ?? null
 
           // FV ranking data
-          const fvRanking = fvRankingMap.get(normalizedName)
+          const fvRanking = fvAssign.get(player.id)
           const fvRank = fvRanking?.rank ?? null
           const fvGrade = fvRanking?.fv ?? null
           const fvETA = fvRanking?.eta ?? null
@@ -406,6 +409,7 @@ export const usePlayerStore = create<PlayerStore>()(
             franchise,
             contractType,
             contractLength,
+            contractEnds,
             salaryByYear,
             prospectRank,
             prospectLevel,
@@ -562,6 +566,7 @@ export const usePlayerStore = create<PlayerStore>()(
         closerMonkey: state.closerMonkey,
         fgMinorsBatters: state.fgMinorsBatters,
         fgMinorsPitchers: state.fgMinorsPitchers,
+        mlbDebuted: state.mlbDebuted,
         salaryReliefDesignations: state.salaryReliefDesignations,
         poolDrafted: state.poolDrafted,
         poolUnavailable: state.poolUnavailable,

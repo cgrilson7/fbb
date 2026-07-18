@@ -110,12 +110,20 @@ export function normalize(name: string): string {
     .replace(/ iv$/i, '')
     .replace(/\s+/g, ' ')
 
-  // Try to expand nickname in first name
   const parts = normalized.split(' ')
+
+  // Fantrax splits two-way players into "-H"/"-P" rows (Shohei Ohtani-H);
+  // the hyphen became a space above, so drop the dangling h/p token to match
+  // the base name used by every other source
+  if (parts.length >= 3 && (parts[parts.length - 1] === 'h' || parts[parts.length - 1] === 'p')) {
+    parts.pop()
+  }
+
+  // Try to expand nickname in first name
   if (parts.length >= 2) {
     parts[0] = expandNickname(parts[0])
-    normalized = parts.join(' ')
   }
+  normalized = parts.join(' ')
 
   return normalized
 }

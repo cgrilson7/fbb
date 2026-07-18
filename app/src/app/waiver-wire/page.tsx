@@ -186,33 +186,42 @@ export default function WaiverWirePage() {
     return avail.map(p => {
       const proj = p.zipsRosProjection!
       const positions = p.position.split(',').map(s => s.trim())
-      const isPitcher = positions.includes('SP') || positions.includes('RP')
+      const isPitcher = positions.includes('SP') || positions.includes('RP') || positions.includes('P')
       const candLP: LineupPlayer = { name: p.name, value: proj.fpts, isFarm: false, basePositions: getBasePositions(p.position), isPitcher, pitcherType: null }
 
       const eligibleSlots = (isPitcher ? PITCHER_SLOTS : POS_SLOTS).filter(slot => isPitcher || isEligibleForSlot(candLP, slot))
-      // Prefer filling an empty eligible slot (pure add); else replace weakest occupant
+      // Roto-optimal single swap: try the candidate in every eligible slot
+      // (filling it if empty, replacing the occupant otherwise) and keep the
+      // swap with the highest roto-point delta. Deduplicate on distinct
+      // occupants so we don't recompute identical swaps.
+      const candRaw = rawOf(proj)
       let replaced: RosterEntry | null = null
       let replacedSlot: string | null = null
-      const emptyEligible = eligibleSlots.find(slot => !selectedBySlot[slot])
-      if (emptyEligible) {
-        replacedSlot = emptyEligible
-      } else {
-        for (const slot of eligibleSlots) {
-          const occ = selectedBySlot[slot]
-          if (occ && (replaced === null || occ.fpts < replaced.fpts)) { replaced = occ; replacedSlot = slot }
+      let deltaPts = -Infinity
+      let newTotals: CatTotals = finalize(baseRaw)
+      const tried = new Set<string>()
+      for (const slot of eligibleSlots) {
+        const occ = selectedBySlot[slot] ?? null
+        const key = occ ? occ.name : '(empty)'
+        if (tried.has(key)) continue
+        tried.add(key)
+        const raw = addRaw(subRaw(baseRaw, occ ? occ.raw : emptyRaw()), candRaw)
+        const totals = finalize(raw)
+        const d = rotoPointsVsField(totals, finalField) - basePoints
+        if (d > deltaPts) {
+          deltaPts = d
+          replaced = occ
+          replacedSlot = slot
+          newTotals = totals
         }
       }
-
-      const candRaw = rawOf(proj)
-      const newRaw = addRaw(subRaw(baseRaw, replaced ? replaced.raw : emptyRaw()), candRaw)
-      const newTotals = finalize(newRaw)
-      const deltaPts = rotoPointsVsField(newTotals, finalField) - basePoints
+      if (deltaPts === -Infinity) deltaPts = 0
 
       return {
         player: p,
         proj,
         isPitcher,
-        line: finalize(rawOf(proj)) as CatTotals, // player's own rate stats
+        line: finalize(candRaw) as CatTotals, // player's own rate stats
         replaced,
         replacedSlot,
         deltaPts,
@@ -220,6 +229,14 @@ export default function WaiverWirePage() {
       }
     })
   }, [players, selectedLineup, selectedBySlot, baseRaw, finalField, basePoints, availFilter])
+
+  // Best pickups across both batters and pitchers (positive roto impact only)
+  const topPickups = useMemo(() => {
+    return [...candidates]
+      .filter(c => c.deltaPts > 0)
+      .sort((a, b) => b.deltaPts - a.deltaPts)
+      .slice(0, 8)
+  }, [candidates])
 
   const visible = useMemo(() => {
     let r = candidates.filter(c => c.isPitcher === (typeFilter === 'pitchers'))
@@ -338,6 +355,53 @@ export default function WaiverWirePage() {
                 </div>
               ))}
             </div>
+          </div>
+
+          {/* Top pickups across batters + pitchers */}
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
+            <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+              Top RoS pickups vs your best lineup
+              <span className="ml-2 text-xs font-normal text-gray-400">best single swap into your 23-man lineup, by projected roto-point gain</span>
+            </h2>
+            {topPickups.length === 0 ? (
+              <p className="text-sm text-gray-400">No available player improves your projected roto points — your lineup is already better than every pickup.</p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+                {topPickups.map(c => {
+                  const rankGains = LEAGUE_CATEGORIES
+                    .map(cat => ({
+                      cat,
+                      before: rankInField(cat.key, baseTotals[cat.key], finalField).rank,
+                      after: rankInField(cat.key, c.newTotals[cat.key], finalField).rank,
+                    }))
+                    .filter(x => x.after !== x.before)
+                  return (
+                    <div key={c.player.id} className="border border-gray-200 dark:border-gray-700 rounded-lg p-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{c.player.name}</span>
+                        <span className="text-sm font-bold text-green-600 dark:text-green-400 shrink-0">+{c.deltaPts}</span>
+                      </div>
+                      <div className="text-xs text-gray-400 mt-0.5">
+                        {c.player.position} · {c.player.team}
+                        {c.player.isWaiver && <span className="ml-1 px-1 rounded bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300 text-[10px]">W</span>}
+                      </div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 truncate">
+                        {c.replaced ? <>drops <span className="text-gray-700 dark:text-gray-300">{c.replaced.name}</span></> : c.replacedSlot ? `fills empty ${c.replacedSlot}` : '—'}
+                      </div>
+                      {rankGains.length > 0 && (
+                        <div className="flex flex-wrap gap-x-2 mt-1 text-[10px]">
+                          {rankGains.slice(0, 4).map(x => (
+                            <span key={x.cat.key} className={x.after < x.before ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}>
+                              {x.cat.label} #{x.before}→#{x.after}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
 
           {/* Available players */}

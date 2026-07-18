@@ -15,11 +15,12 @@ import type {
   CloserMonkeyEntry,
   FGMinorsBatter,
   FGMinorsPitcher,
+  MLBDebutedEntry,
   ProspectRanking,
   LeagueStanding
 } from '@/types'
 
-export type FileType = 'players' | 'hkb' | 'salaries' | 'battingProspects' | 'pitchingProspects' | 'zipsBatters' | 'zipsPitchers' | 'zipsDcBatters' | 'zipsDcPitchers' | 'zipsRosBatters' | 'zipsRosPitchers' | 'freeAgency' | 'fvRankings' | 'fpRankings' | 'closers' | 'closermonkey' | 'fgMinorsBatters' | 'fgMinorsPitchers' | 'prospectRankings' | 'standings' | 'zips27Batters' | 'zips27Pitchers' | 'zips28Batters' | 'zips28Pitchers'
+export type FileType = 'players' | 'hkb' | 'salaries' | 'battingProspects' | 'pitchingProspects' | 'zipsBatters' | 'zipsPitchers' | 'zipsDcBatters' | 'zipsDcPitchers' | 'zipsRosBatters' | 'zipsRosPitchers' | 'freeAgency' | 'fvRankings' | 'fpRankings' | 'closers' | 'closermonkey' | 'fgMinorsBatters' | 'fgMinorsPitchers' | 'mlbDebuted' | 'prospectRankings' | 'standings' | 'zips27Batters' | 'zips27Pitchers' | 'zips28Batters' | 'zips28Pitchers'
 
 export function detectFileType(filename: string): FileType | null {
   const lower = filename.toLowerCase()
@@ -34,6 +35,7 @@ export function detectFileType(filename: string): FileType | null {
   if (lower.includes('prospect') && lower.includes('rank')) return 'prospectRankings'
   if (lower.includes('standing')) return 'standings'
   if (lower.includes('free') && lower.includes('agen')) return 'freeAgency'
+  if (lower.includes('debut')) return 'mlbDebuted'
   if (lower.includes('fangraphs') && lower.includes('minors') && lower.includes('batter')) return 'fgMinorsBatters'
   if (lower.includes('fangraphs') && lower.includes('minors') && lower.includes('pitcher')) return 'fgMinorsPitchers'
   if (lower.includes('batting') && lower.includes('prospect')) return 'battingProspects'
@@ -129,6 +131,10 @@ function transformData(rows: Record<string, string>[], type: FileType): unknown[
       return rows.filter(row => (row['Name'] || '').trim() !== '').map(transformFGMinorsBatter)
     case 'fgMinorsPitchers':
       return rows.filter(row => (row['Name'] || '').trim() !== '').map(transformFGMinorsPitcher)
+    case 'mlbDebuted':
+      return rows
+        .filter(row => (row['PlayerId'] || '').trim() !== '')
+        .map(row => ({ playerId: row['PlayerId'].trim(), name: row['Name'] || '' } as MLBDebutedEntry))
     default:
       return rows
   }
@@ -158,6 +164,7 @@ function transformPlayer(row: Record<string, string>): Player {
     franchise: null,
     contractType: null,
     contractLength: null,
+    contractEnds: null,
     salaryByYear: {},
     prospectRank: null,
     prospectLevel: null,
@@ -244,6 +251,7 @@ function transformSalary(row: Record<string, string>): SalaryEntry {
     contractEnds: contractEndsRaw ? parseInt(contractEndsRaw, 10) : 0,
     salaryByYear,
     acquisitionDate: getValue(['Acq. Date', 'Acquisition Date']).trim(),
+    dropDate: getValue(['Drop Date']).trim(),
     normalizedName: normalize(playerName)
   }
 }
@@ -577,6 +585,7 @@ const DEFAULT_DATA_MANIFEST: { url: string; type: FileType }[] = [
   { url: '/data/closermonkey.csv', type: 'closermonkey' },
   { url: '/data/fangraphs_minors_batters.csv', type: 'fgMinorsBatters' },
   { url: '/data/fangraphs_minors_pitchers.csv', type: 'fgMinorsPitchers' },
+  { url: '/data/mlb_debuted.csv', type: 'mlbDebuted' },
 ]
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -612,6 +621,7 @@ export async function fetchAndLoadDefaults(
     closermonkey: 'closerMonkey',
     fgMinorsBatters: 'fgMinorsBatters',
     fgMinorsPitchers: 'fgMinorsPitchers',
+    mlbDebuted: 'mlbDebuted',
   }
 
   const setterMap: Record<FileType, string> = {
@@ -639,6 +649,7 @@ export async function fetchAndLoadDefaults(
     closermonkey: 'setCloserMonkey',
     fgMinorsBatters: 'setFGMinorsBatters',
     fgMinorsPitchers: 'setFGMinorsPitchers',
+    mlbDebuted: 'setMLBDebuted',
   }
 
   // Always fetch all bundled files so deploys with updated CSVs take effect

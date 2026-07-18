@@ -6,9 +6,13 @@ import { useHydration } from '@/lib/useHydration'
 import { Loader2, Trophy, Users, Hash } from 'lucide-react'
 import Diamond from './Diamond'
 import type { PositionCard, SlotCandidate } from './Diamond'
+import type { Player } from '@/types'
 import {
   BASE_POSITIONS,
   LINEUP_SLOTS,
+  POS_SLOTS,
+  PITCHER_SLOTS,
+  ALL_START_SLOTS,
   SLOT_ELIGIBILITY,
   type LineupPlayer,
   getBasePositions,
@@ -16,6 +20,25 @@ import {
   isEligibleForSlot,
   findOptimalLineup,
 } from '@/lib/lineup'
+import { computeStandings, fieldFor } from '@/lib/rotoStandings'
+import { isExpiring } from '@/lib/contracts'
+import {
+  LEAGUE_CATEGORIES,
+  classifyPitcherRole,
+  emptyRaw,
+  addRaw,
+  subRaw,
+  finalize,
+  rotoPointsVsField,
+  rankInField,
+} from '@/lib/categories'
+import {
+  optimizeRotoLineup,
+  assignmentRaw,
+  analyzePitcherMix,
+  type RosterEntry,
+  type SlotAssignment,
+} from '@/lib/rotoLineup'
 
 const MY_FRANCHISE = 'Colin Wilson & Greg Holmes'
 
@@ -26,15 +49,44 @@ const ROSTER_DISPLAY_POSITIONS = ['C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF',
 const DIAMOND_LINEUP_SLOTS = ['C', '1B', '2B', '3B', 'SS', 'MI', 'CI', 'LF', 'CF', 'RF', 'OF'] as const
 
 type ValueMetric = 'hkb' | 'fpts' | 'fpRank'
-type ZipsSource = 'zips' | 'zipsDc'
+type ZipsSource = 'zips' | 'zipsDc' | 'zipsRos'
+type ViewMode = 'roster' | 'bestLineup' | 'depthChart' | 'rosCategories' | 'distributions'
+type LineupBasis = 'roto' | 'metric'
+
+function entryToLineupPlayer(e: RosterEntry): LineupPlayer {
+  return {
+    name: e.name,
+    value: e.fpts,
+    isFarm: e.isFarm,
+    basePositions: e.basePositions,
+    isPitcher: e.isPitcher,
+    pitcherType: e.isPitcher ? classifyPitcherRole(e.proj) : null,
+  }
+}
+
+function catFmt(v: number, decimals: number): string {
+  if (decimals === 0) return Math.round(v).toString()
+  const s = v.toFixed(decimals)
+  return decimals === 3 ? s.replace(/^0/, '') : s
+}
+
+function catRankClass(rank: number, n: number): string {
+  const pct = (rank - 1) / Math.max(1, n - 1)
+  if (pct <= 0.2) return 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
+  if (pct <= 0.45) return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+  if (pct <= 0.7) return 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+  return 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-300'
+}
 
 export default function FranchiseValuePage() {
   const { players, franchiseMappings, lockedSlots, lockedSlotsFranchise, lockedSlotsMetric, setLockedSlots, clearLockedSlots, setLockedSlotsMeta } = usePlayerStore()
   const hasHydrated = useHydration()
   const [selectedFranchise, setSelectedFranchise] = useState(MY_FRANCHISE)
-  const [viewMode, setViewMode] = useState<'roster' | 'bestLineup' | 'depthChart' | 'distributions'>('roster')
+  const [viewMode, setViewMode] = useState<ViewMode>('roster')
   const [valueMetric, setValueMetric] = useState<ValueMetric>('hkb')
   const [zipsSource, setZipsSource] = useState<ZipsSource>('zips')
+  const [lineupBasis, setLineupBasis] = useState<LineupBasis>('roto')
+  const [excludeExpiring, setExcludeExpiring] = useState(true)
   const [sortCol, setSortCol] = useState<string>('total')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
@@ -45,27 +97,33 @@ export default function FranchiseValuePage() {
       if (lockedSlotsFranchise && lockedSlotsFranchise !== selectedFranchise) {
         clearLockedSlots()
       }
-      const currentMetricKey = valueMetric === 'fpts' ? `fpts:${zipsSource}` : valueMetric
+      // 'roto:ros' matches the waiver page's key, so a lineup locked here
+      // carries over there (and vice versa)
+      const currentMetricKey = lineupBasis === 'roto' ? 'roto:ros' : valueMetric === 'fpts' ? `fpts:${zipsSource}` : valueMetric
       if (lockedSlotsMetric && lockedSlotsMetric !== currentMetricKey) {
         clearLockedSlots()
       }
       setLockedSlotsMeta(selectedFranchise, currentMetricKey)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedFranchise, valueMetric, zipsSource, viewMode])
+  }, [selectedFranchise, valueMetric, zipsSource, viewMode, lineupBasis])
 
   // Clear locks when switching franchise or view mode
   const handleFranchiseChange = (f: string) => {
     setSelectedFranchise(f)
     clearLockedSlots()
   }
-  const handleViewModeChange = (mode: 'roster' | 'bestLineup' | 'depthChart' | 'distributions') => {
+  const handleViewModeChange = (mode: ViewMode) => {
     setViewMode(mode)
     clearLockedSlots()
   }
 
-  const zipsLabel = zipsSource === 'zipsDc' ? 'ZiPS DC' : 'ZiPS'
-  const metricLabel = valueMetric === 'hkb' ? 'HKB Value' : valueMetric === 'fpts' ? `${zipsLabel} FPTS` : 'FP Rank Value'
+  const zipsLabel = zipsSource === 'zipsDc' ? 'ZiPS DC' : zipsSource === 'zipsRos' ? 'RoS DC' : 'ZiPS'
+  const rotoLineupActive = viewMode === 'bestLineup' && lineupBasis === 'roto'
+  // Expiring-contract exclusion applies to dynasty-value views only — RoS roto
+  // views keep rentals because they still play this season
+  const expiringFilterActive = excludeExpiring && viewMode !== 'rosCategories' && !rotoLineupActive
+  const metricLabel = rotoLineupActive ? 'RoS DC FPTS' : valueMetric === 'hkb' ? 'HKB Value' : valueMetric === 'fpts' ? `${zipsLabel} FPTS` : 'FP Rank Value'
 
   const franchises = useMemo(() => {
     return franchiseMappings
@@ -76,8 +134,10 @@ export default function FranchiseValuePage() {
 
   // Extract value from a player based on selected metric
   function getPlayerValue(p: typeof players[number]): number | null {
+    // Roto-optimized best lineup always displays RoS Depth Charts FPTS
+    if (rotoLineupActive) return p.zipsRosProjection?.fpts ?? null
     if (valueMetric === 'fpts') {
-      const proj = zipsSource === 'zipsDc' ? p.zipsDcProjection : p.zipsProjection
+      const proj = zipsSource === 'zipsDc' ? p.zipsDcProjection : zipsSource === 'zipsRos' ? p.zipsRosProjection : p.zipsProjection
       return proj?.fpts ?? null
     }
     if (valueMetric === 'fpRank') return p.fpRank != null ? 301 - p.fpRank : null
@@ -90,11 +150,12 @@ export default function FranchiseValuePage() {
     franchises.forEach(f => { map[f] = [] })
     players.forEach(p => {
       if (!p.franchise || !map[p.franchise]) return
+      if (expiringFilterActive && isExpiring(p)) return
       const value = getPlayerValue(p)
       if (value === null || value === undefined) return
       const posStr = p.position
       const positions = posStr.split(',').map(s => s.trim())
-      const isPitcher = positions.includes('SP') || positions.includes('RP')
+      const isPitcher = positions.includes('SP') || positions.includes('RP') || positions.includes('P')
       map[p.franchise].push({
         name: p.name,
         value,
@@ -106,7 +167,7 @@ export default function FranchiseValuePage() {
     })
     return map
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [players, franchises, valueMetric, zipsSource])
+  }, [players, franchises, valueMetric, zipsSource, rotoLineupActive, expiringFilterActive])
 
   // Build per-franchise, per-position value aggregation (roster mode)
   const franchiseData = useMemo(() => {
@@ -122,6 +183,7 @@ export default function FranchiseValuePage() {
     players.forEach(p => {
       const franchise = p.franchise
       if (!franchise || !data[franchise]) return
+      if (expiringFilterActive && isExpiring(p)) return
       const value = getPlayerValue(p)
       if (value === null || value === undefined) return
 
@@ -142,19 +204,63 @@ export default function FranchiseValuePage() {
 
     return data
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [players, franchises, valueMetric, zipsSource])
+  }, [players, franchises, valueMetric, zipsSource, rotoLineupActive, expiringFilterActive])
 
-  // Compute optimal lineups for all franchises (best lineup mode)
-  // Selected franchise uses lockedSlots; others use no locks
+  // League-wide roto standings (RoS Depth Charts, roto-optimal lineups).
+  // Needed by the RoS Categories view and the roto-based Best Lineup view.
+  const rotoStandingsMap = useMemo(() => {
+    if (viewMode !== 'rosCategories' && !rotoLineupActive) return null
+    const valid = new Set(franchises)
+    const m = new Map<string, Player[]>()
+    for (const p of players) {
+      if (!p.franchise || !valid.has(p.franchise) || p.isAvailable) continue
+      if (!m.has(p.franchise)) m.set(p.franchise, [])
+      m.get(p.franchise)!.push(p)
+    }
+    return computeStandings(m)
+  }, [viewMode, rotoLineupActive, players, franchises])
+
+  // Selected franchise's roto lineup, honoring slot locks
+  const selectedRotoAssign = useMemo((): SlotAssignment | null => {
+    if (!rotoLineupActive || !rotoStandingsMap) return null
+    const st = rotoStandingsMap.get(selectedFranchise)
+    if (!st) return null
+    if (Object.keys(lockedSlots).length === 0) return st.lineup
+    return optimizeRotoLineup(st.entries, lockedSlots, fieldFor(rotoStandingsMap, selectedFranchise))
+  }, [rotoLineupActive, rotoStandingsMap, selectedFranchise, lockedSlots])
+
+  // Compute optimal lineups for all franchises (best lineup mode).
+  // Roto basis: lineups come from the roto-points optimizer (RoS DC data);
+  // Metric basis: value-maximizing assignment for the selected metric.
+  // Selected franchise uses lockedSlots; others use no locks.
   const optimalLineups = useMemo(() => {
     if (viewMode !== 'bestLineup') return {}
     const lineups: Record<string, Record<string, LineupPlayer | null>> = {}
+    if (lineupBasis === 'roto' && rotoStandingsMap) {
+      franchises.forEach(f => {
+        const assign = f === selectedFranchise && selectedRotoAssign ? selectedRotoAssign : rotoStandingsMap.get(f)?.lineup
+        const rec: Record<string, LineupPlayer | null> = {}
+        if (assign) {
+          for (const slot of ALL_START_SLOTS) {
+            const e = assign[slot]
+            rec[slot] = e ? entryToLineupPlayer(e) : null
+          }
+          // Synthetic lump slot, same shape findOptimalLineup produces
+          const chosen = PITCHER_SLOTS.map(s => assign[s]).filter((e): e is RosterEntry => !!e)
+          rec['P'] = chosen.length > 0
+            ? { name: `${chosen.length} pitchers`, value: chosen.reduce((s, e) => s + e.fpts, 0), isFarm: false, basePositions: [], isPitcher: true, pitcherType: null }
+            : null
+        }
+        lineups[f] = rec
+      })
+      return lineups
+    }
     franchises.forEach(f => {
       const locks = f === selectedFranchise ? lockedSlots : {}
       lineups[f] = findOptimalLineup(franchisePlayersByTeam[f] || [], locks)
     })
     return lineups
-  }, [viewMode, franchises, franchisePlayersByTeam, selectedFranchise, lockedSlots])
+  }, [viewMode, lineupBasis, rotoStandingsMap, selectedRotoAssign, franchises, franchisePlayersByTeam, selectedFranchise, lockedSlots])
 
   // Build depth chart data: all players at every eligible base position
   const depthChartData = useMemo(() => {
@@ -209,6 +315,7 @@ export default function FranchiseValuePage() {
       const bestByName: Record<string, Record<string, number>> = {} // franchise -> name -> best value
       players.forEach(p => {
         if (!p.franchise || !byFranchise[p.franchise]) return
+        if (expiringFilterActive && isExpiring(p)) return
         const v = getValue(p)
         if (v == null) return
         if (!bestByName[p.franchise]) bestByName[p.franchise] = {}
@@ -243,17 +350,83 @@ export default function FranchiseValuePage() {
       buildRankTable('Fantrax ADP', 'Sorted by avg ADP (lower = better)', p => p.adp, true),
       buildRankTable('HKB Dynasty Rank', 'Sorted by avg HKB rank (lower = better)', p => p.hkbRank, true),
     ]
-  }, [viewMode, players, franchises, selectedFranchise])
+  }, [viewMode, players, franchises, selectedFranchise, expiringFilterActive])
+
+  // Projected RoS roto standings sorted for the RoS Categories view
+  const rosStandings = useMemo(() => {
+    if (viewMode !== 'rosCategories' || !rotoStandingsMap) return null
+    return [...rotoStandingsMap.values()].sort((a, b) => b.rotoTotal - a.rotoTotal)
+  }, [viewMode, rotoStandingsMap])
+
+  // 14-category totals + ranks + roto points for the selected roto lineup
+  const rotoCatPanel = useMemo(() => {
+    if (!rotoLineupActive || !selectedRotoAssign || !rotoStandingsMap) return null
+    const field = fieldFor(rotoStandingsMap, selectedFranchise)
+    const totals = finalize(assignmentRaw(selectedRotoAssign))
+    return { totals, field, points: rotoPointsVsField(totals, field), n: rotoStandingsMap.size }
+  }, [rotoLineupActive, selectedRotoAssign, rotoStandingsMap, selectedFranchise])
+
+  // Pitching plan: optimal SP/RP mix sweep + marginal roto value per pitcher
+  const pitchingAnalysis = useMemo(() => {
+    if (!rotoLineupActive || !selectedRotoAssign || !rotoStandingsMap) return null
+    const st = rotoStandingsMap.get(selectedFranchise)
+    if (!st) return null
+    const field = fieldFor(rotoStandingsMap, selectedFranchise)
+
+    let hitterRaw = emptyRaw()
+    for (const slot of POS_SLOTS) {
+      const e = selectedRotoAssign[slot]
+      if (e) hitterRaw = addRaw(hitterRaw, e.raw)
+    }
+    const mixes = analyzePitcherMix(st.entries, hitterRaw, field)
+
+    const lineupRaw = assignmentRaw(selectedRotoAssign)
+    const basePts = rotoPointsVsField(finalize(lineupRaw), field)
+    const inLineup = new Set(PITCHER_SLOTS.map(s => selectedRotoAssign[s]?.name).filter((n): n is string => !!n))
+
+    const marginal = st.entries
+      .filter(e => e.isPitcher && !e.isFarm)
+      .map(p => {
+        let m: number
+        if (inLineup.has(p.name)) {
+          // Value of holding: points lost if removed outright
+          m = basePts - rotoPointsVsField(finalize(subRaw(lineupRaw, p.raw)), field)
+        } else {
+          // Value of adding: best single swap into the 10
+          m = -Infinity
+          for (const slot of PITCHER_SLOTS) {
+            const occ = selectedRotoAssign[slot]
+            const raw = addRaw(occ ? subRaw(lineupRaw, occ.raw) : lineupRaw, p.raw)
+            m = Math.max(m, rotoPointsVsField(finalize(raw), field) - basePts)
+          }
+          if (m === -Infinity) m = 0
+        }
+        return { entry: p, role: classifyPitcherRole(p.proj), inLineup: inLineup.has(p.name), marginal: m }
+      })
+      .sort((a, b) => b.marginal - a.marginal)
+
+    const currentMix = {
+      sp: marginal.filter(x => x.inLineup && x.role === 'SP').length,
+      rp: marginal.filter(x => x.inLineup && x.role === 'RP').length,
+    }
+    const bestMix = mixes.length > 0 ? mixes.reduce((a, b) => (b.points > a.points ? b : a)) : null
+
+    return { mixes, marginal, basePts, currentMix, bestMix }
+  }, [rotoLineupActive, selectedRotoAssign, rotoStandingsMap, selectedFranchise])
 
   // Pitcher sidebar data for selected franchise
   const pitcherData = useMemo(() => {
     const teamPlayers = franchisePlayersByTeam[selectedFranchise] || []
     const pitchers = teamPlayers.filter(p => p.isPitcher).sort((a, b) => b.value - a.value)
     if (viewMode === 'bestLineup') {
-      const top10 = pitchers.slice(0, 10)
+      // Read the chosen 10 from the lineup's P slots (in roto mode this can
+      // differ from the top 10 by value)
+      const lineup = optimalLineups[selectedFranchise] || {}
+      const chosen = PITCHER_SLOTS.map(s => lineup[s]).filter((p): p is LineupPlayer => !!p)
+        .sort((a, b) => b.value - a.value)
       return {
-        players: top10.map(p => ({ name: p.name, value: p.value, isFarm: p.isFarm, type: p.pitcherType })),
-        totalValue: top10.reduce((sum, p) => sum + p.value, 0),
+        players: chosen.map(p => ({ name: p.name, value: p.value, isFarm: p.isFarm, type: p.pitcherType })),
+        totalValue: chosen.reduce((sum, p) => sum + p.value, 0),
       }
     }
     // roster and depthChart modes show all pitchers
@@ -261,7 +434,7 @@ export default function FranchiseValuePage() {
       players: pitchers.map(p => ({ name: p.name, value: p.value, isFarm: p.isFarm, type: p.pitcherType })),
       totalValue: pitchers.reduce((sum, p) => sum + p.value, 0),
     }
-  }, [franchisePlayersByTeam, selectedFranchise, viewMode])
+  }, [franchisePlayersByTeam, selectedFranchise, viewMode, optimalLineups])
 
   // The active display positions depend on mode
   const displayPositions = viewMode === 'bestLineup' ? LINEUP_SLOTS : viewMode === 'depthChart' ? ROSTER_DISPLAY_POSITIONS : ROSTER_DISPLAY_POSITIONS
@@ -404,8 +577,7 @@ export default function FranchiseValuePage() {
       let count = 0
       for (const slot of LINEUP_SLOTS) {
         if (slot === 'P') {
-          const pitchers = (franchisePlayersByTeam[selectedFranchise] || []).filter(p => p.isPitcher)
-          count += Math.min(pitchers.length, 10)
+          count += PITCHER_SLOTS.filter(s => optimalLineups[selectedFranchise]?.[s] != null).length
         } else if (optimalLineups[selectedFranchise]?.[slot] != null) {
           count++
         }
@@ -456,9 +628,11 @@ export default function FranchiseValuePage() {
       if (p) lineupNames.add(p.name)
     }
 
-    // Top 10 pitchers are in the lineup
-    const allPitchers = teamPlayers.filter(p => p.isPitcher && !p.isFarm).sort((a, b) => b.value - a.value)
-    const top10Pitchers = new Set(allPitchers.slice(0, 10).map(p => p.name))
+    // Chosen pitchers come from the lineup's P slots (roto mode may skip a
+    // higher-FPTS arm for category reasons)
+    const top10Pitchers = new Set(
+      PITCHER_SLOTS.map(s => lineup[s]?.name).filter((n): n is string => !!n)
+    )
 
     const bench: LineupPlayer[] = []
     const farm: LineupPlayer[] = []
@@ -625,6 +799,16 @@ export default function FranchiseValuePage() {
               Depth Chart
             </button>
             <button
+              onClick={() => handleViewModeChange('rosCategories')}
+              className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                viewMode === 'rosCategories'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'
+              }`}
+            >
+              RoS Categories
+            </button>
+            <button
               onClick={() => handleViewModeChange('distributions')}
               className={`px-3 py-1.5 text-sm font-medium transition-colors ${
                 viewMode === 'distributions'
@@ -635,7 +819,24 @@ export default function FranchiseValuePage() {
               Distributions
             </button>
           </div>
-          <div className="inline-flex rounded-lg border border-gray-300 dark:border-gray-600 overflow-hidden">
+          {viewMode === 'bestLineup' && (
+            <div className="inline-flex rounded-lg border border-gray-300 dark:border-gray-600 overflow-hidden">
+              {(['roto', 'metric'] as const).map(b => (
+                <button
+                  key={b}
+                  onClick={() => { setLineupBasis(b); clearLockedSlots() }}
+                  className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                    lineupBasis === b
+                      ? 'bg-green-600 text-white'
+                      : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'
+                  }`}
+                >
+                  {b === 'roto' ? 'Roto Points (RoS)' : 'Metric Value'}
+                </button>
+              ))}
+            </div>
+          )}
+          {!rotoLineupActive && <div className="inline-flex rounded-lg border border-gray-300 dark:border-gray-600 overflow-hidden">
             <button
               onClick={() => setValueMetric('hkb')}
               className={`px-3 py-1.5 text-sm font-medium transition-colors ${
@@ -666,10 +867,10 @@ export default function FranchiseValuePage() {
             >
               FP Rank
             </button>
-          </div>
-          {valueMetric === 'fpts' && (
+          </div>}
+          {!rotoLineupActive && valueMetric === 'fpts' && (
             <div className="inline-flex rounded-lg border border-gray-300 dark:border-gray-600 overflow-hidden">
-              {(['zips', 'zipsDc'] as const).map(s => (
+              {(['zips', 'zipsDc', 'zipsRos'] as const).map(s => (
                 <button
                   key={s}
                   onClick={() => setZipsSource(s)}
@@ -679,10 +880,24 @@ export default function FranchiseValuePage() {
                       : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'
                   }`}
                 >
-                  {s === 'zips' ? 'ZiPS' : 'ZiPS DC'}
+                  {s === 'zips' ? 'ZiPS' : s === 'zipsDc' ? 'ZiPS DC' : 'RoS DC'}
                 </button>
               ))}
             </div>
+          )}
+          {viewMode !== 'rosCategories' && !rotoLineupActive && (
+            <label
+              className="flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-300 whitespace-nowrap cursor-pointer"
+              title="Hide players whose contract ends in 2026 (rentals, final-year YP deals, in-season pickups) — no dynasty value beyond this season. Ceddanne Rafaela is kept (planned Hometown Discount)."
+            >
+              <input
+                type="checkbox"
+                checked={excludeExpiring}
+                onChange={(e) => setExcludeExpiring(e.target.checked)}
+                className="rounded border-gray-300 dark:border-gray-600"
+              />
+              Excl. expiring
+            </label>
           )}
           <select
             value={selectedFranchise}
@@ -698,7 +913,9 @@ export default function FranchiseValuePage() {
 
       {viewMode === 'bestLineup' && (
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          Optimal lineup per Section 2.4: C, 1B, 2B, 3B, SS, MI, CI, LF, CF, RF, OF, DH, UTIL + 10 Pitchers. Multi-position players assigned to maximize total value.
+          {rotoLineupActive
+            ? 'Roto-optimal lineup: C, 1B, 2B, 3B, SS, MI, CI, LF, CF, RF, OF, DH, UTIL + 10 Pitchers, chosen to maximize projected roto points across all 14 league categories (RoS Depth Charts projections, every opponent also at its roto-optimal lineup). Player values shown are RoS DC FPTS.'
+            : 'Optimal lineup per Section 2.4: C, 1B, 2B, 3B, SS, MI, CI, LF, CF, RF, OF, DH, UTIL + 10 Pitchers. Multi-position players assigned to maximize total value.'}
         </p>
       )}
       {viewMode === 'depthChart' && (
@@ -706,9 +923,16 @@ export default function FranchiseValuePage() {
           Full organizational depth at each position. Multi-position players appear at every eligible position.
         </p>
       )}
+      {viewMode === 'rosCategories' && (
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          Projected rest-of-season roto standings using FanGraphs RoS Depth Charts projections. Every franchise fields its
+          roto-optimal 23-man lineup (13 hitters + 10 pitchers), then teams are ranked in all 14 league categories —
+          points = {franchises.length} for 1st down to 1 for last.
+        </p>
+      )}
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {viewMode !== 'rosCategories' && <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-blue-100 dark:bg-blue-900 rounded-lg">
@@ -752,7 +976,128 @@ export default function FranchiseValuePage() {
             </div>
           </div>
         </div>
-      </div>
+      </div>}
+
+      {/* RoS Category Standings View */}
+      {viewMode === 'rosCategories' && rosStandings && (() => {
+        const n = rosStandings.length
+        const selected = rosStandings.find(s => s.franchise === selectedFranchise)
+        const selRank = selected ? rosStandings.indexOf(selected) + 1 : null
+        const maxPts = n * LEAGUE_CATEGORIES.length
+        const batCats = LEAGUE_CATEGORIES.filter(c => c.group === 'bat')
+        const pitCats = LEAGUE_CATEGORIES.filter(c => c.group === 'pit')
+        return (
+          <div className="space-y-4">
+            {/* Summary cards for selected franchise */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-blue-100 dark:bg-blue-900 rounded-lg">
+                    <Trophy className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Projected Roto Points</p>
+                    <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                      {selected ? selected.rotoTotal : '—'} <span className="text-sm font-normal text-gray-400">/ {maxPts}</span>
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-purple-100 dark:bg-purple-900 rounded-lg">
+                    <Hash className="w-6 h-6 text-purple-600 dark:text-purple-400" />
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Projected RoS Finish</p>
+                    <p className="text-2xl font-bold text-gray-900 dark:text-white">#{selRank ?? '—'} of {n}</p>
+                  </div>
+                </div>
+              </div>
+              <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-green-100 dark:bg-green-900 rounded-lg">
+                    <Users className="w-6 h-6 text-green-600 dark:text-green-400" />
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Gap to Leader</p>
+                    <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                      {selected ? (rosStandings[0].rotoTotal - selected.rotoTotal === 0 ? 'Leading' : `-${rosStandings[0].rotoTotal - selected.rotoTotal} pts`) : '—'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* League-wide category standings table */}
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
+              <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Projected RoS Category Standings</h2>
+                <p className="text-xs text-gray-400 mt-0.5">Each cell: projected value with category rank. Green = top of league, red = bottom.</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-gray-50 dark:bg-gray-700">
+                    <tr>
+                      <th className="px-2 py-2 text-left font-medium text-gray-500 dark:text-gray-400 uppercase">#</th>
+                      <th className="px-2 py-2 text-left font-medium text-gray-500 dark:text-gray-400 uppercase whitespace-nowrap">Franchise</th>
+                      <th className="px-2 py-2 text-center font-medium text-gray-500 dark:text-gray-400 uppercase">Pts</th>
+                      {[...batCats, ...pitCats].map(cat => (
+                        <th key={cat.key} className="px-1.5 py-2 text-center font-medium text-gray-500 dark:text-gray-400 uppercase">{cat.label}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">
+                    {rosStandings.map((s, i) => (
+                      <tr key={s.franchise} className={s.franchise === selectedFranchise ? 'bg-blue-50 dark:bg-blue-900/20 font-medium' : 'hover:bg-gray-50 dark:hover:bg-gray-700/30'}>
+                        <td className="px-2 py-1.5 text-gray-400">{i + 1}</td>
+                        <td className="px-2 py-1.5 text-gray-900 dark:text-white whitespace-nowrap">
+                          {s.franchise.length > 26 ? s.franchise.slice(0, 24) + '…' : s.franchise}
+                        </td>
+                        <td className="px-2 py-1.5 text-center font-bold text-gray-900 dark:text-white tabular-nums">{s.rotoTotal}</td>
+                        {[...batCats, ...pitCats].map(cat => (
+                          <td key={cat.key} className="px-1.5 py-1.5 text-center">
+                            <div className="tabular-nums text-gray-700 dark:text-gray-300">{catFmt(s.totals[cat.key], cat.decimals)}</div>
+                            <div className={`mt-0.5 inline-flex items-center justify-center px-1 rounded text-[10px] font-bold ${catRankClass(s.ranks[cat.key], n)}`}>
+                              #{s.ranks[cat.key]}
+                            </div>
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Selected franchise: strengths & weaknesses */}
+            {selected && (
+              <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
+                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">{selectedFranchise} — category detail</h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <tbody>
+                      {[batCats, pitCats].map((group, gi) => (
+                        <tr key={gi} className="align-top">
+                          {group.map(cat => (
+                            <td key={cat.key} className="px-2 py-1.5 text-center border-r border-gray-100 dark:border-gray-700/50 last:border-0">
+                              <div className="text-[10px] uppercase tracking-wide text-gray-400">{cat.label}</div>
+                              <div className="font-semibold text-gray-900 dark:text-gray-100 tabular-nums">{catFmt(selected.totals[cat.key], cat.decimals)}</div>
+                              <div className={`mt-0.5 inline-flex items-center justify-center px-1.5 rounded text-[10px] font-bold ${catRankClass(selected.ranks[cat.key], n)}`}>
+                                #{selected.ranks[cat.key]} · {selected.points[cat.key]} pts
+                              </div>
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )
+      })()}
 
       {/* Distributions View */}
       {viewMode === 'distributions' && distributionData && (
@@ -812,8 +1157,43 @@ export default function FranchiseValuePage() {
         </div>
       )}
 
+      {/* RoS category facts for the roto-optimal lineup */}
+      {rotoLineupActive && rotoCatPanel && (
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Projected RoS categories — this lineup</h2>
+            <div className="text-sm">
+              <span className="text-gray-500 dark:text-gray-400">Roto points </span>
+              <span className="font-bold text-blue-600 dark:text-blue-400">{rotoCatPanel.points}</span>
+              <span className="text-gray-400"> / {rotoCatPanel.n * LEAGUE_CATEGORIES.length}</span>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <tbody>
+                {[LEAGUE_CATEGORIES.filter(c => c.group === 'bat'), LEAGUE_CATEGORIES.filter(c => c.group === 'pit')].map((group, gi) => (
+                  <tr key={gi} className="align-top">
+                    {group.map(cat => {
+                      const v = rotoCatPanel.totals[cat.key]
+                      const { rank } = rankInField(cat.key, v, rotoCatPanel.field)
+                      return (
+                        <td key={cat.key} className="px-2 py-1.5 text-center border-r border-gray-100 dark:border-gray-700/50 last:border-0">
+                          <div className="text-[10px] uppercase tracking-wide text-gray-400">{cat.label}</div>
+                          <div className="font-semibold text-gray-900 dark:text-gray-100 tabular-nums">{catFmt(v, cat.decimals)}</div>
+                          <div className={`mt-0.5 inline-flex items-center justify-center px-1.5 rounded text-[10px] font-bold ${catRankClass(rank, rotoCatPanel.n)}`}>#{rank}</div>
+                        </td>
+                      )
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Diamond + Pitcher Sidebar */}
-      {viewMode !== 'distributions' && <div className="grid grid-cols-[200px_1fr] gap-4">
+      {viewMode !== 'distributions' && viewMode !== 'rosCategories' && <div className="grid grid-cols-[200px_1fr] gap-4">
         {/* Pitchers Sidebar */}
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
           <div className="flex items-center justify-between mb-3">
@@ -1059,8 +1439,96 @@ export default function FranchiseValuePage() {
         </div>
       </div>}
 
+      {/* Pitching plan: optimal SP/RP mix + best arms on roster */}
+      {rotoLineupActive && pitchingAnalysis && (
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 space-y-4">
+          <div>
+            <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+              Pitching plan — SP/RP mix
+              <span className="ml-2 text-xs font-normal text-gray-400">
+                each mix re-optimizes the 10 pitcher slots (hitters fixed); current lineup: {pitchingAnalysis.currentMix.sp} SP / {pitchingAnalysis.currentMix.rp} RP
+              </span>
+            </h2>
+            <div className="mt-2 overflow-x-auto">
+              <table className="text-sm">
+                <thead>
+                  <tr className="text-xs text-gray-500 dark:text-gray-400">
+                    <th className="text-left pr-4 py-1 font-medium">Mix</th>
+                    <th className="text-right pr-4 py-1 font-medium">Roto Pts</th>
+                    <th className="text-right pr-4 py-1 font-medium">Δ vs lineup</th>
+                    <th className="text-left py-1 font-medium">Pitchers</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">
+                  {pitchingAnalysis.mixes.map(mix => {
+                    const isBest = pitchingAnalysis.bestMix && mix.sp === pitchingAnalysis.bestMix.sp && mix.rp === pitchingAnalysis.bestMix.rp
+                    const isCurrent = mix.sp === pitchingAnalysis.currentMix.sp && mix.rp === pitchingAnalysis.currentMix.rp
+                    const d = mix.points - pitchingAnalysis.basePts
+                    return (
+                      <tr key={`${mix.sp}-${mix.rp}`} className={isBest ? 'bg-green-50 dark:bg-green-900/20' : ''}>
+                        <td className="pr-4 py-1 whitespace-nowrap text-gray-900 dark:text-gray-100">
+                          {mix.sp} SP / {mix.rp} RP
+                          {isBest && <span className="ml-1.5 text-[10px] px-1 rounded bg-green-600 text-white font-bold">OPTIMAL</span>}
+                          {isCurrent && <span className="ml-1.5 text-[10px] px-1 rounded bg-blue-600 text-white font-bold">CURRENT</span>}
+                        </td>
+                        <td className="pr-4 py-1 text-right font-semibold tabular-nums text-gray-900 dark:text-gray-100">{mix.points}</td>
+                        <td className={`pr-4 py-1 text-right tabular-nums ${d > 0 ? 'text-green-600 dark:text-green-400' : d < 0 ? 'text-red-500 dark:text-red-400' : 'text-gray-400'}`}>
+                          {d > 0 ? '+' : ''}{d}
+                        </td>
+                        <td className="py-1 text-xs text-gray-500 dark:text-gray-400">
+                          {[...mix.pitchers].sort((a, b) => b.fpts - a.fpts).map(p => p.name.split(' ').slice(-1)[0]).join(', ')}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3 border-t border-gray-200 dark:border-gray-700">
+            {(['SP', 'RP'] as const).map(role => {
+              const list = pitchingAnalysis.marginal.filter(x => x.role === role)
+              return (
+                <div key={role}>
+                  <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
+                    {role === 'SP' ? 'Starters' : 'Relievers'} on roster ({list.length})
+                    <span className="ml-2 text-xs font-normal text-gray-400">by marginal roto value vs this lineup</span>
+                  </h3>
+                  <div className="space-y-0.5">
+                    {list.length === 0 && <div className="text-xs text-gray-400">none</div>}
+                    {list.map(x => (
+                      <div key={x.entry.name} className="flex items-center justify-between text-xs gap-2">
+                        <span className="flex items-center gap-1.5 min-w-0">
+                          <span className={`truncate ${x.inLineup ? 'font-medium text-gray-900 dark:text-gray-100' : 'text-gray-500 dark:text-gray-400'}`}>{x.entry.name}</span>
+                          {x.inLineup && <span className="text-[9px] px-1 rounded bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 font-bold shrink-0">IN</span>}
+                        </span>
+                        <span className="text-gray-400 tabular-nums flex gap-2 shrink-0">
+                          <span className="w-11 text-right">{(x.entry.proj.ip ?? 0).toFixed(0)} IP</span>
+                          {role === 'SP'
+                            ? <span className="w-10 text-right">{x.entry.proj.qs ?? 0} QS</span>
+                            : <span className="w-16 text-right">{x.entry.proj.sv ?? 0} SV/{x.entry.proj.hld ?? 0} HD</span>}
+                          <span className="w-9 text-right">{(x.entry.proj.era ?? 0).toFixed(2)}</span>
+                          <span className="w-8 text-right">{x.entry.proj.k ?? 0} K</span>
+                          <span className={`w-9 text-right font-bold ${x.marginal > 0 ? 'text-green-600 dark:text-green-400' : x.marginal < 0 ? 'text-red-500 dark:text-red-400' : 'text-gray-400'}`}>
+                            {x.inLineup ? '' : '+'}{x.marginal}
+                          </span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <p className="text-[11px] text-gray-400">
+            IN = in the current roto-optimal 10. Marginal value: for lineup arms, roto points lost if dropped outright; for others, best roto-point gain from a single swap into the 10.
+          </p>
+        </div>
+      )}
+
       {/* League Comparison Table */}
-      {viewMode !== 'distributions' && <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
+      {viewMode !== 'distributions' && viewMode !== 'rosCategories' && <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
         <div className="p-4 border-b border-gray-200 dark:border-gray-700">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
             League Comparison {viewMode === 'bestLineup' ? '(Best Lineup)' : viewMode === 'depthChart' ? '(Depth Chart)' : ''}

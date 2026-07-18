@@ -18,6 +18,7 @@ export interface Player {
   franchise: string | null
   contractType: string | null
   contractLength: number | null
+  contractEnds: number | null
   salaryByYear: Record<number, number>
   // Joined from prospects
   prospectRank: number | null
@@ -66,6 +67,7 @@ export interface SalaryEntry {
   contractEnds: number
   salaryByYear: Record<number, number>
   acquisitionDate: string
+  dropDate: string // non-empty = dropped (dead cap row); never joins to a player
   normalizedName: string
 }
 
@@ -178,6 +180,13 @@ export interface FGMinorsPitcher {
   xfip: number
   playerId: string
   normalizedName: string
+}
+
+// FanGraphs player ids with any MLB appearance since 2000 (mlb_debuted.csv,
+// via scrape_mlb_debuts.py) — same id space as the FG minors CSVs
+export interface MLBDebutedEntry {
+  playerId: string
+  name: string
 }
 
 export interface FranchiseMapping {

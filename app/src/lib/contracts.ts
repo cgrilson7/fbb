@@ -9,6 +9,16 @@ export interface ContractInfo {
   type: string
 }
 
+// Planned Hometown Discount re-signs (normalized names) — treated as keepers
+// despite expiring deals. Add future planned HTD/RFA keeps here.
+export const HTD_KEEPS = new Set(['ceddanne rafaela'])
+
+// Contract ends in 2026: rentals, final-year YP deals, in-season pickups.
+// These carry no dynasty value beyond this season.
+export function isExpiring(p: Player): boolean {
+  return p.contractEnds === 2026 && !HTD_KEEPS.has(p.normalizedName)
+}
+
 // Remaining contract from `fromYear` onward (years with a positive salary hit).
 export function remainingContract(p: Player, fromYear = 2026): ContractInfo {
   const byYear = Object.entries(p.salaryByYear || {})
