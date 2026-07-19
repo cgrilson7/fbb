@@ -151,6 +151,31 @@ interface PlayerStore {
   getProspects: (type: 'batting' | 'pitching' | 'all') => Player[]
 }
 
+// Keys persisted to IndexedDB — user-created state only, never the datasets
+const USER_STATE_KEYS = [
+  'salaryReliefDesignations',
+  'poolDrafted',
+  'poolUnavailable',
+  'rfoDraftPicks',
+  'rfoUnavailable',
+  'rfoDraftCursor',
+  'lockedSlots',
+  'lockedSlotsFranchise',
+  'lockedSlotsMetric',
+  'franchiseMappings',
+  'nameMappings',
+] as const
+
+function pickUserState(state: object): Partial<PlayerStore> {
+  const src = state as Record<string, unknown>
+  const out: Record<string, unknown> = {}
+  for (const key of USER_STATE_KEYS) {
+    // Skip missing keys so hydration merge can't overwrite defaults with undefined
+    if (src[key] !== undefined) out[key] = src[key]
+  }
+  return out as Partial<PlayerStore>
+}
+
 export const usePlayerStore = create<PlayerStore>()(
   persist(
     (set, get) => ({
@@ -540,55 +565,20 @@ export const usePlayerStore = create<PlayerStore>()(
     {
       name: 'fbb-player-store',
       storage: createJSONStorage(() => idbStorage),
-      version: 1,
-      partialize: (state) => ({
-        rawPlayers: state.rawPlayers,
-        hkbPlayers: state.hkbPlayers,
-        salaries: state.salaries,
-        battingProspects: state.battingProspects,
-        pitchingProspects: state.pitchingProspects,
-        zipsBatters: state.zipsBatters,
-        zipsPitchers: state.zipsPitchers,
-        zipsDcBatters: state.zipsDcBatters,
-        zipsDcPitchers: state.zipsDcPitchers,
-        zipsRosBatters: state.zipsRosBatters,
-        zipsRosPitchers: state.zipsRosPitchers,
-        freeAgentEntries: state.freeAgentEntries,
-        fvRankings: state.fvRankings,
-        prospectRankings: state.prospectRankings,
-        standings: state.standings,
-        zips27Batters: state.zips27Batters,
-        zips27Pitchers: state.zips27Pitchers,
-        zips28Batters: state.zips28Batters,
-        zips28Pitchers: state.zips28Pitchers,
-        fpRankings: state.fpRankings,
-        closers: state.closers,
-        closerMonkey: state.closerMonkey,
-        fgMinorsBatters: state.fgMinorsBatters,
-        fgMinorsPitchers: state.fgMinorsPitchers,
-        mlbDebuted: state.mlbDebuted,
-        salaryReliefDesignations: state.salaryReliefDesignations,
-        poolDrafted: state.poolDrafted,
-        poolUnavailable: state.poolUnavailable,
-        rfoDraftPicks: state.rfoDraftPicks,
-        rfoUnavailable: state.rfoUnavailable,
-        rfoDraftCursor: state.rfoDraftCursor,
-        lockedSlots: state.lockedSlots,
-        lockedSlotsFranchise: state.lockedSlotsFranchise,
-        lockedSlotsMetric: state.lockedSlotsMetric,
-        franchiseMappings: state.franchiseMappings,
-        nameMappings: state.nameMappings,
-      }),
-      onRehydrateStorage: () => (state) => {
-        if (state) {
-          // Re-join data after rehydration if we have raw data
-          if (state.rawPlayers.length > 0) {
-            state.joinData()
-          }
-          usePlayerStore.setState({ _hasHydrated: true })
-        } else {
-          usePlayerStore.setState({ _hasHydrated: true })
+      version: 2,
+      // Only user-created state is persisted. The datasets are refetched from
+      // /data on every load anyway, and persisting them (~15MB as JSON,
+      // re-stringified on every set) crashed mobile browsers.
+      partialize: (state) => pickUserState(state),
+      migrate: (persisted, version) => {
+        // v1 persisted every parsed dataset; keep only user state
+        if (version < 2 && persisted) {
+          return pickUserState(persisted as Record<string, unknown>)
         }
+        return persisted
+      },
+      onRehydrateStorage: () => () => {
+        usePlayerStore.setState({ _hasHydrated: true })
       },
     }
   )
