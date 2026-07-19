@@ -415,6 +415,7 @@ function transformProspectRanking(row: Record<string, string>): ProspectRanking 
     mlbRank: parseNumber(row['MLB Rank']),
     mlbPreseasonRank: parseNumber(row['MLB Preseason Rank']),
     klawRank: parseNumber(row['KLaw Rank']),
+    klawPreseasonRank: parseNumber(row['KLaw Preseason Rank']),
     eta: parseNumber(row['ETA']),
     normalizedName: normalize(name)
   }

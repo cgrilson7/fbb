@@ -12,7 +12,7 @@ const MY_CODE = 'C&G'
 
 type ProspectType = 'all' | 'batting' | 'pitching'
 type SortField = 'name' | 'team' | 'level' | 'age' | 'hkbRank' | 'hkbValue' | 'fvGrade' | 'fvRank' |
-  'mlbRank' | 'klawRank' | 'eta' | 'rankTrend' | 'score' | 'perf' |
+  'mlbRank' | 'klawRank' | 'eta' | 'rankTrend' | 'klawTrend' | 'score' | 'perf' |
   'pa' | 'avg' | 'obp' | 'slg' | 'ops' | 'iso' | 'wrcPlus' | 'bbPct' | 'kPct' |
   'ip' | 'era' | 'fip' | 'xfip' | 'whip' | 'k9' | 'bb9' | 'kMinusBbPct' | 'franchise'
 type SortOrder = 'asc' | 'desc'
@@ -149,6 +149,16 @@ export default function ProspectsPage() {
         ? (ranking.mlbPreseasonRank ?? 101) - ranking.mlbRank
         : null
 
+      // KLaw movement is not symmetric with the MLB one: the preseason list ran
+      // 100 deep and the midseason list only 50, so dropping off it is only
+      // informative for someone who was inside the top 50 to begin with. A
+      // player who was #75 and is now unlisted may not have moved at all.
+      const klawPre = ranking?.klawPreseasonRank ?? null
+      const klawNow = ranking?.klawRank ?? null
+      const klawTrend = klawNow != null && klawPre != null ? klawPre - klawNow : null
+      const klawEntered = klawNow != null && klawPre == null
+      const klawDropped = klawNow == null && klawPre != null && klawPre <= 50
+
       const scored: ProspectScore | undefined = prospect.type === 'batting'
         ? batterScores.get(prospect.playerId)
         : pitcherScores.get(prospect.playerId)
@@ -171,6 +181,10 @@ export default function ProspectsPage() {
         mlbRank: ranking?.mlbRank ?? null,
         mlbPreseasonRank: ranking?.mlbPreseasonRank ?? null,
         klawRank: ranking?.klawRank ?? null,
+        klawPreseasonRank: klawPre,
+        klawTrend,
+        klawEntered,
+        klawDropped,
         eta: ranking?.eta ?? fv?.eta ?? null,
         rankTrend,
       }
@@ -259,6 +273,7 @@ export default function ProspectsPage() {
         case 'klawRank': aVal = a.klawRank; bVal = b.klawRank; break
         case 'eta': aVal = a.eta; bVal = b.eta; break
         case 'rankTrend': aVal = a.rankTrend; bVal = b.rankTrend; break
+        case 'klawTrend': aVal = a.klawTrend; bVal = b.klawTrend; break
         case 'fvGrade': aVal = a.fvGrade; bVal = b.fvGrade; break
         case 'fvRank': aVal = a.fvRank; bVal = b.fvRank; break
         // Batting stats
@@ -310,7 +325,7 @@ export default function ProspectsPage() {
       setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')
     } else {
       setSortField(field)
-      const descFields = ['score', 'perf', 'hkbValue', 'fvGrade', 'rankTrend', 'pa', 'avg', 'obp', 'slg', 'ops', 'iso', 'wrcPlus', 'ip', 'k9', 'kPct', 'kMinusBbPct']
+      const descFields = ['score', 'perf', 'klawTrend', 'hkbValue', 'fvGrade', 'rankTrend', 'pa', 'avg', 'obp', 'slg', 'ops', 'iso', 'wrcPlus', 'ip', 'k9', 'kPct', 'kMinusBbPct']
       const ascFields = ['era', 'fip', 'xfip', 'whip', 'bb9', 'bbPct', 'hkbRank', 'fvRank', 'mlbRank', 'klawRank', 'eta', 'age', 'level']
       if (descFields.includes(field)) setSortOrder('desc')
       else if (ascFields.includes(field)) setSortOrder('asc')
@@ -479,6 +494,7 @@ export default function ProspectsPage() {
                 <th className={thClass} onClick={() => handleSort('mlbRank')} title="MLB Pipeline Top 100">MLB100 <SortIcon field="mlbRank" /></th>
                 <th className={thClass} onClick={() => handleSort('rankTrend')} title="MLB Pipeline rank change since preseason (▲ = rising)">Trend <SortIcon field="rankTrend" /></th>
                 <th className={thClass} onClick={() => handleSort('klawRank')} title="Keith Law Top 100 (The Athletic)">KLaw <SortIcon field="klawRank" /></th>
+                <th className={thClass} onClick={() => handleSort('klawTrend')} title="Keith Law rank change, preseason top 100 → midseason top 50 (▲ = rising). OUT = was inside the preseason top 50 and is no longer listed.">KL&nbsp;Trend <SortIcon field="klawTrend" /></th>
                 <th className={thClass} onClick={() => handleSort('fvGrade')}>FV <SortIcon field="fvGrade" /></th>
                 <th className={thClass} onClick={() => handleSort('name')}>Name <SortIcon field="name" /></th>
                 <th className={thClass} onClick={() => handleSort('team')}>Org <SortIcon field="team" /></th>
@@ -561,6 +577,21 @@ export default function ProspectsPage() {
                     )}
                   </td>
                   <td className="px-3 py-2 text-sm text-gray-900 dark:text-white tabular-nums">{p.klawRank ?? '—'}</td>
+                  <td className="px-3 py-2 text-sm tabular-nums whitespace-nowrap">
+                    {p.klawEntered ? (
+                      <span className="text-green-600 dark:text-green-400 font-semibold" title="Entered the top 50; unranked in the preseason top 100">NEW</span>
+                    ) : p.klawDropped ? (
+                      <span className="text-red-500 font-medium" title={`Was #${p.klawPreseasonRank} preseason, no longer listed`}>OUT</span>
+                    ) : p.klawTrend === null ? (
+                      <span className="text-gray-400 dark:text-gray-500">—</span>
+                    ) : p.klawTrend > 0 ? (
+                      <span className="text-green-600 dark:text-green-400 font-semibold">▲{p.klawTrend}</span>
+                    ) : p.klawTrend < 0 ? (
+                      <span className="text-red-500 font-medium">▼{Math.abs(p.klawTrend)}</span>
+                    ) : (
+                      <span className="text-gray-400 dark:text-gray-500">=</span>
+                    )}
+                  </td>
                   <td className="px-3 py-2 text-sm font-medium">
                     {p.fvGrade ? (
                       <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-bold ${p.fvGrade >= 60 ? 'bg-purple-100 text-purple-800 dark:bg-purple-800 dark:text-purple-100' : p.fvGrade >= 50 ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-800 dark:text-indigo-100' : 'bg-gray-100 text-gray-800 dark:bg-gray-600 dark:text-gray-100'}`}>

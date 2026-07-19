@@ -264,7 +264,8 @@ export interface ProspectRanking {
   position: string
   mlbRank: number | null          // MLB Pipeline Top 100 current rank
   mlbPreseasonRank: number | null // MLB Pipeline rank at start of season (for movement)
-  klawRank: number | null         // Keith Law Top 100
+  klawRank: number | null         // Keith Law top list, current (midseason 2026: top 50)
+  klawPreseasonRank: number | null // Keith Law rank at start of season (top 100)
   eta: number | null              // Projected MLB debut year (MLB Pipeline ETA)
   normalizedName: string
 }
