@@ -3,7 +3,21 @@
 import { Fragment, useMemo, useState } from 'react'
 import { usePlayerStore } from '@/lib/store'
 import { useHydration } from '@/lib/useHydration'
+import { assignEntries } from '@/lib/playerMatch'
+import { normalize } from '@/lib/normalize'
 import { ChevronUp, ChevronDown, Loader2 } from 'lucide-react'
+
+// FanGraphs aggregates a season into one row; `Level` is a comma-joined list
+// of every level played. The highest one is the player's current level.
+const LEVEL_ORDER: Record<string, number> = {
+  'AAA': 1, 'AA': 2, 'A+': 3, 'A': 4, 'A-': 5, 'Rk': 6, 'CPX': 7, 'DSL': 8, 'FCL': 9
+}
+
+function topLevel(level: string): string {
+  const parts = level.split(',').map(s => s.trim()).filter(Boolean)
+  if (parts.length === 0) return ''
+  return parts.reduce((best, lv) => (LEVEL_ORDER[lv] ?? 99) < (LEVEL_ORDER[best] ?? 99) ? lv : best)
+}
 
 type SortField = 'franchise' | 'totalValue' | 'avgValue' | 'prospectCount' | 'topProspectValue' | 'fvTotal' | 'avgFV'
 type SortOrder = 'asc' | 'desc'
@@ -38,7 +52,7 @@ interface FarmRanking {
 }
 
 export default function FarmSystemPage() {
-  const { battingProspects, pitchingProspects, players, hkbPlayers, fvRankings, franchiseMappings } = usePlayerStore()
+  const { fgMinorsBatters, fgMinorsPitchers, players, hkbPlayers, fvRankings, prospectRankings, franchiseMappings, mlbDebuted } = usePlayerStore()
   const hasHydrated = useHydration()
   const [sortField, setSortField] = useState<SortField>('totalValue')
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
@@ -47,44 +61,65 @@ export default function FarmSystemPage() {
   const farmRankings = useMemo(() => {
     const hkbMap = new Map(hkbPlayers.map(p => [p.normalizedName, p]))
     const fvMap = new Map(fvRankings.map(p => [p.normalizedName, p]))
+    const rankingMap = new Map(prospectRankings.map(p => [p.normalizedName, p]))
     const playerMap = new Map(players.map(p => [p.normalizedName, p]))
     const franchiseMap = new Map(franchiseMappings.map(m => [m.shortCode, m.fullName]))
 
-    // Build all prospects with their owner info
+    // Anyone with an MLB appearance (ever) is no longer a prospect — same
+    // exclusion the Prospects page uses. Exact FG PlayerId match for the MiLB
+    // leaderboard rows; normalized-name match for the id-less FV fallback rows.
+    const debutedIds = new Set(mlbDebuted.map(d => d.playerId))
+    const debutedNames = new Set(mlbDebuted.map(d => normalize(d.name)))
+
     const allProspects = [
-      ...battingProspects.map(p => ({ ...p, type: 'batting' as const })),
-      ...pitchingProspects.map(p => ({ ...p, type: 'pitching' as const }))
-    ]
+      ...fgMinorsBatters.map(p => ({ ...p, type: 'batting' as const })),
+      ...fgMinorsPitchers.map(p => ({ ...p, type: 'pitching' as const }))
+    ].filter(p => !debutedIds.has(p.playerId))
+
+    // Roster status joined collision-aware, not by name alone (two Fernando
+    // Cruzes) — same pairing the Prospects page does.
+    const matchable = players.map(p => ({
+      id: p.id, normalizedName: p.normalizedName, team: p.team,
+      position: p.position, age: p.age, status: p.status,
+    }))
+    const rosterAssign = assignEntries(
+      matchable,
+      allProspects,
+      // MiLB rows carry no position, so the type stands in for the role check.
+      e => ({ team: e.team, age: e.age, positions: e.type === 'pitching' ? 'P' : 'UT' }),
+    )
+    const playerById = new Map(players.map(p => [p.id, p]))
+    const rosterOf = new Map<string, (typeof players)[number]>()
+    for (const [playerId, prospect] of rosterAssign) {
+      const p = playerById.get(playerId)
+      if (p) rosterOf.set(prospect.playerId, p)
+    }
 
     // Group by franchise
     const byFranchise = new Map<string, FarmProspect[]>()
 
     for (const prospect of allProspects) {
-      // Filter out MLB-level
-      if (prospect.level === 'MLB') continue
-      const hkb = hkbMap.get(prospect.normalizedName)
-      if (hkb?.level === 'MLB') continue
-      const fv = fvMap.get(prospect.normalizedName)
-      if (fv?.highestLevel === 'MLB') continue
-
-      const player = playerMap.get(prospect.normalizedName)
+      const player = rosterOf.get(prospect.playerId)
       const status = player?.status ?? 'FA'
       if (status === 'FA') continue // Skip free agents
 
       const franchise = franchiseMap.get(status) || status
+      const hkb = hkbMap.get(prospect.normalizedName)
+      const fv = fvMap.get(prospect.normalizedName)
+      const ranking = rankingMap.get(prospect.normalizedName)
 
       const farmProspect: FarmProspect = {
-        name: prospect.fullName,
+        name: prospect.name,
         normalizedName: prospect.normalizedName,
         hkbRank: hkb?.rank ?? null,
         hkbValue: hkb?.value ?? null,
         fvGrade: fv?.fv ?? null,
         fvRank: fv?.rank ?? null,
-        fvETA: fv?.eta ?? null,
+        fvETA: ranking?.eta ?? fv?.eta ?? null,
         fvPosition: fv?.position ?? null,
         team: prospect.team,
         age: prospect.age,
-        level: prospect.level.startsWith('ALL') ? prospect.level.replace('ALL', 'Multi') : prospect.level,
+        level: topLevel(prospect.level),
         type: prospect.type,
       }
 
@@ -94,9 +129,12 @@ export default function FarmSystemPage() {
       byFranchise.get(franchise)!.push(farmProspect)
     }
 
-    // Also include FV-ranked prospects not in batting/pitching prospect lists
+    // FV-ranked prospects with no MiLB stat line this season (injured, drafted
+    // but not yet playing) are still farm assets — include them by name, with
+    // the debut exclusion applied by name since FV rows carry no FG id.
     for (const fv of fvRankings) {
       if (fv.highestLevel === 'MLB') continue
+      if (debutedNames.has(fv.normalizedName)) continue
       const player = playerMap.get(fv.normalizedName)
       const status = player?.status ?? 'FA'
       if (status === 'FA') continue
@@ -106,6 +144,7 @@ export default function FarmSystemPage() {
       if (existing?.some(p => p.normalizedName === fv.normalizedName)) continue
 
       const hkb = hkbMap.get(fv.normalizedName)
+      const ranking = rankingMap.get(fv.normalizedName)
 
       const farmProspect: FarmProspect = {
         name: fv.name,
@@ -114,7 +153,7 @@ export default function FarmSystemPage() {
         hkbValue: hkb?.value ?? null,
         fvGrade: fv.fv,
         fvRank: fv.rank,
-        fvETA: fv.eta,
+        fvETA: ranking?.eta ?? fv.eta,
         fvPosition: fv.position,
         team: fv.team,
         age: fv.age ?? 0,
@@ -172,7 +211,7 @@ export default function FarmSystemPage() {
     })
 
     return rankings
-  }, [battingProspects, pitchingProspects, players, hkbPlayers, fvRankings, franchiseMappings, sortField, sortOrder])
+  }, [fgMinorsBatters, fgMinorsPitchers, mlbDebuted, players, hkbPlayers, fvRankings, prospectRankings, franchiseMappings, sortField, sortOrder])
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -199,11 +238,11 @@ export default function FarmSystemPage() {
     )
   }
 
-  if (battingProspects.length === 0 && pitchingProspects.length === 0 && fvRankings.length === 0) {
+  if (fgMinorsBatters.length === 0 && fgMinorsPitchers.length === 0 && fvRankings.length === 0) {
     return (
       <div className="text-center py-12">
         <p className="text-gray-500 dark:text-gray-400">
-          No prospect data loaded. Upload batting/pitching prospects or FV rankings on the Upload page.
+          No MiLB stats loaded. Upload fangraphs_minors_batters.csv and fangraphs_minors_pitchers.csv.
         </p>
       </div>
     )
@@ -215,8 +254,8 @@ export default function FarmSystemPage() {
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
           Farm System Rankings
         </h1>
-        <span className="text-sm text-gray-500 dark:text-gray-400">
-          {farmRankings.length} franchises
+        <span className="text-sm text-gray-500 dark:text-gray-400" title="Anyone with an MLB appearance (any year) is excluded via mlb_debuted.csv — same rule as the Prospects tab">
+          {farmRankings.length} franchises · MLB-debuted excluded
         </span>
       </div>
 
