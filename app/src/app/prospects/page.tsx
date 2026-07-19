@@ -3,11 +3,16 @@
 import { useState, useMemo } from 'react'
 import { usePlayerStore } from '@/lib/store'
 import { useHydration } from '@/lib/useHydration'
+import { scoreBatters, scorePitchers, COMPONENT_WEIGHTS, type ExpertInputs, type ProspectScore } from '@/lib/prospectScore'
+import { assignEntries } from '@/lib/playerMatch'
 import { Search, ChevronUp, ChevronDown, X, Loader2 } from 'lucide-react'
+
+// Our franchise's all.csv status code — rows on our farm get highlighted.
+const MY_CODE = 'C&G'
 
 type ProspectType = 'all' | 'batting' | 'pitching'
 type SortField = 'name' | 'team' | 'level' | 'age' | 'hkbRank' | 'hkbValue' | 'fvGrade' | 'fvRank' |
-  'mlbRank' | 'klawRank' | 'eta' | 'rankTrend' |
+  'mlbRank' | 'klawRank' | 'eta' | 'rankTrend' | 'score' | 'perf' |
   'pa' | 'avg' | 'obp' | 'slg' | 'ops' | 'iso' | 'wrcPlus' | 'bbPct' | 'kPct' |
   'ip' | 'era' | 'fip' | 'xfip' | 'whip' | 'k9' | 'bb9' | 'kMinusBbPct' | 'franchise'
 type SortOrder = 'asc' | 'desc'
@@ -37,6 +42,29 @@ function topLevel(level: string): string {
   return parts.reduce((best, lv) => (LEVEL_ORDER[lv] ?? 99) < (LEVEL_ORDER[best] ?? 99) ? lv : best)
 }
 
+function scoreBadgeColor(score: number): string {
+  if (score >= 70) return 'bg-purple-100 text-purple-800 dark:bg-purple-800 dark:text-purple-100'
+  if (score >= 55) return 'bg-indigo-100 text-indigo-800 dark:bg-indigo-800 dark:text-indigo-100'
+  if (score >= 40) return 'bg-gray-100 text-gray-800 dark:bg-gray-600 dark:text-gray-100'
+  return 'bg-gray-50 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
+}
+
+// The score is a blend, so it is worth being able to see which component drove
+// it — a 60 off elite production reads very differently from a 60 off pedigree.
+function scoreTooltip(parts: ProspectScore | null): string {
+  if (!parts) return ''
+  const lines = [
+    `Performance ${parts.perf.toFixed(0)} (${(COMPONENT_WEIGHTS.perf * 100).toFixed(0)}%)`,
+    `  ${parts.ageVsLevel >= 0 ? `${parts.ageVsLevel.toFixed(1)} yrs younger` : `${Math.abs(parts.ageVsLevel).toFixed(1)} yrs older`} than level avg`,
+    parts.expert == null
+      ? 'Scouting — none; weight redistributed to performance and ETA'
+      : `Scouting ${parts.expert.toFixed(0)} (${(COMPONENT_WEIGHTS.expert * 100).toFixed(0)}%)`,
+    `ETA ${parts.etaUsed}${parts.etaInferred ? ' (inferred from level)' : ''} → ${parts.etaScore.toFixed(0)} (${(COMPONENT_WEIGHTS.eta * 100).toFixed(0)}%)`,
+    `Sample reliability ${(parts.reliability * 100).toFixed(0)}%`,
+  ]
+  return lines.join('\n')
+}
+
 export default function ProspectsPage() {
   const { fgMinorsBatters, fgMinorsPitchers, players, hkbPlayers, fvRankings, prospectRankings, franchiseMappings, mlbDebuted } = usePlayerStore()
   const hasHydrated = useHydration()
@@ -49,7 +77,8 @@ export default function ProspectsPage() {
   const [franchiseFilter, setFranchiseFilter] = useState('')
   const [showAvailableOnly, setShowAvailableOnly] = useState(false)
   const [showRankedOnly, setShowRankedOnly] = useState(false)
-  const [sortField, setSortField] = useState<SortField>('wrcPlus')
+  const [showMineOnly, setShowMineOnly] = useState(false)
+  const [sortField, setSortField] = useState<SortField>('score')
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
 
   // Anyone with an MLB appearance (ever) is no longer a prospect — this drops
@@ -62,14 +91,54 @@ export default function ProspectsPage() {
       ...fgMinorsPitchers.map(p => ({ ...p, type: 'pitching' as const }))
     ].filter(p => !debutedIds.has(p.playerId))
 
-    const playerMap = new Map(players.map(p => [p.normalizedName, p]))
+    // Roster status must be joined collision-aware, not by name alone: there are
+    // two Fernando Cruzes (our 36-year-old NYY reliever and a 19-year-old Cubs
+    // CPX shortstop), and a name-keyed map hands the prospect our reliever's
+    // status — highlighting a free agent as ours. Role/team/age pairing keeps
+    // each all.csv player attached to at most one leaderboard row.
+    const matchable = players.map(p => ({
+      id: p.id, normalizedName: p.normalizedName, team: p.team,
+      position: p.position, age: p.age, status: p.status,
+    }))
+    const rosterAssign = assignEntries(
+      matchable,
+      allProspects,
+      // MiLB rows carry no position, so the type stands in for the role check.
+      e => ({ team: e.team, age: e.age, positions: e.type === 'pitching' ? 'P' : 'UT' }),
+    )
+    // assignEntries maps all.csv id → prospect; invert it to prospect → player.
+    const playerById = new Map(players.map(p => [p.id, p]))
+    const rosterOf = new Map<string, (typeof players)[number]>()
+    for (const [playerId, prospect] of rosterAssign) {
+      const p = playerById.get(playerId)
+      if (p) rosterOf.set(prospect.playerId, p)
+    }
+
     const hkbMap = new Map(hkbPlayers.map(p => [p.normalizedName, p]))
     const fvMap = new Map(fvRankings.map(p => [p.normalizedName, p]))
     const rankingMap = new Map(prospectRankings.map(p => [p.normalizedName, p]))
     const franchiseMap = new Map(franchiseMappings.map(m => [m.shortCode, m.fullName]))
 
+    // Scored against the FULL leaderboard, not the prospect subset: the level
+    // baselines are meant to be "the average player at this level", which
+    // includes the MLB-debuted vets we hide from the table below.
+    const expertOf = (p: { normalizedName: string }): ExpertInputs => {
+      const hkb = hkbMap.get(p.normalizedName)
+      const fv = fvMap.get(p.normalizedName)
+      const ranking = rankingMap.get(p.normalizedName)
+      return {
+        fvGrade: fv?.fv ?? null,
+        mlbRank: ranking?.mlbRank ?? null,
+        klawRank: ranking?.klawRank ?? null,
+        hkbRank: hkb?.rank ?? null,
+        eta: ranking?.eta ?? fv?.eta ?? null,
+      }
+    }
+    const batterScores = scoreBatters(fgMinorsBatters, expertOf)
+    const pitcherScores = scorePitchers(fgMinorsPitchers, expertOf)
+
     return allProspects.map(prospect => {
-      const player = playerMap.get(prospect.normalizedName)
+      const player = rosterOf.get(prospect.playerId)
       const hkb = hkbMap.get(prospect.normalizedName)
       const fv = fvMap.get(prospect.normalizedName)
       const ranking = rankingMap.get(prospect.normalizedName)
@@ -80,12 +149,19 @@ export default function ProspectsPage() {
         ? (ranking.mlbPreseasonRank ?? 101) - ranking.mlbRank
         : null
 
+      const scored: ProspectScore | undefined = prospect.type === 'batting'
+        ? batterScores.get(prospect.playerId)
+        : pitcherScores.get(prospect.playerId)
+
       return {
         ...prospect,
         currentLevel: topLevel(prospect.level),
         isAvailable: player?.isAvailable ?? true,
+        isMine: status === MY_CODE,
         status,
         franchise,
+        score: scored?.score ?? null,
+        scoreParts: scored ?? null,
         hkbRank: hkb?.rank ?? null,
         hkbValue: hkb?.value ?? null,
         fvGrade: fv?.fv ?? null,
@@ -161,11 +237,17 @@ export default function ProspectsPage() {
       result = result.filter(p => p.mlbRank !== null || p.klawRank !== null)
     }
 
+    if (showMineOnly) {
+      result = result.filter(p => p.isMine)
+    }
+
     result.sort((a, b) => {
       let aVal: string | number | null = null
       let bVal: string | number | null = null
 
       switch (sortField) {
+        case 'score': aVal = a.score; bVal = b.score; break
+        case 'perf': aVal = a.scoreParts?.perf ?? null; bVal = b.scoreParts?.perf ?? null; break
         case 'name': aVal = a.name; bVal = b.name; break
         case 'team': aVal = a.team; bVal = b.team; break
         case 'level': aVal = LEVEL_ORDER[a.currentLevel] ?? 99; bVal = LEVEL_ORDER[b.currentLevel] ?? 99; break
@@ -221,14 +303,14 @@ export default function ProspectsPage() {
     })
 
     return result
-  }, [enrichedProspects, prospectType, search, levelFilter, minPa, minIp, teamFilter, franchiseFilter, showAvailableOnly, showRankedOnly, sortField, sortOrder])
+  }, [enrichedProspects, prospectType, search, levelFilter, minPa, minIp, teamFilter, franchiseFilter, showAvailableOnly, showRankedOnly, showMineOnly, sortField, sortOrder])
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
       setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')
     } else {
       setSortField(field)
-      const descFields = ['hkbValue', 'fvGrade', 'rankTrend', 'pa', 'avg', 'obp', 'slg', 'ops', 'iso', 'wrcPlus', 'ip', 'k9', 'kPct', 'kMinusBbPct']
+      const descFields = ['score', 'perf', 'hkbValue', 'fvGrade', 'rankTrend', 'pa', 'avg', 'obp', 'slg', 'ops', 'iso', 'wrcPlus', 'ip', 'k9', 'kPct', 'kMinusBbPct']
       const ascFields = ['era', 'fip', 'xfip', 'whip', 'bb9', 'bbPct', 'hkbRank', 'fvRank', 'mlbRank', 'klawRank', 'eta', 'age', 'level']
       if (descFields.includes(field)) setSortOrder('desc')
       else if (ascFields.includes(field)) setSortOrder('asc')
@@ -245,6 +327,7 @@ export default function ProspectsPage() {
     setSearch('')
     setShowAvailableOnly(false)
     setShowRankedOnly(false)
+    setShowMineOnly(false)
     setLevelFilter('')
     setMinPa('')
     setMinIp('')
@@ -252,7 +335,7 @@ export default function ProspectsPage() {
     setFranchiseFilter('')
   }
 
-  const hasFilters = search || showAvailableOnly || showRankedOnly || levelFilter || minPa || minIp || teamFilter || franchiseFilter
+  const hasFilters = search || showAvailableOnly || showRankedOnly || showMineOnly || levelFilter || minPa || minIp || teamFilter || franchiseFilter
 
   if (!hasHydrated) {
     return (
@@ -290,6 +373,17 @@ export default function ProspectsPage() {
       </div>
 
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
+        <div className="flex flex-wrap gap-4 items-center text-xs text-gray-500 dark:text-gray-400 mb-3">
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block w-3 h-3 rounded-sm bg-blue-100 dark:bg-blue-900/60 border-l-4 border-blue-500" />
+            Our farm (C&amp;G)
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block w-3 h-3 rounded-sm bg-green-100 dark:bg-green-900/40" />
+            Free agent
+          </span>
+          <span className="ml-auto">Score = performance 40% · scouting 40% · ETA 20%; <span className="font-medium">*</span> = no scouting coverage, scored on performance + ETA alone. Hover any score for the breakdown.</span>
+        </div>
         <div className="flex flex-wrap gap-4 items-center">
           <div className="flex rounded-lg border border-gray-300 dark:border-gray-600 overflow-hidden">
             {(['all', 'batting', 'pitching'] as const).map(type => (
@@ -361,6 +455,11 @@ export default function ProspectsPage() {
             <span className="text-sm text-gray-700 dark:text-gray-300">Top 100 only</span>
           </label>
 
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={showMineOnly} onChange={(e) => setShowMineOnly(e.target.checked)} className="w-4 h-4 text-blue-600 rounded" />
+            <span className="text-sm text-gray-700 dark:text-gray-300">My farm only</span>
+          </label>
+
           {hasFilters && (
             <button onClick={clearFilters} className="flex items-center gap-1 px-3 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white">
               <X className="w-4 h-4" /> Clear
@@ -374,6 +473,8 @@ export default function ProspectsPage() {
           <table className="w-full">
             <thead className="bg-gray-50 dark:bg-gray-700">
               <tr>
+                <th className={thClass} onClick={() => handleSort('score')} title="Aggregate 0-100: level-adjusted MiLB performance (40%), scouting consensus (40%), ETA (20%). Computed separately for batters and pitchers.">Score <SortIcon field="score" /></th>
+                <th className={thClass} onClick={() => handleSort('perf')} title="The performance component alone (level-adjusted production + age vs level). Sort here to find risers no list has caught up to yet.">Perf <SortIcon field="perf" /></th>
                 <th className={thClass} onClick={() => handleSort('hkbRank')}>HKB <SortIcon field="hkbRank" /></th>
                 <th className={thClass} onClick={() => handleSort('mlbRank')} title="MLB Pipeline Top 100">MLB100 <SortIcon field="mlbRank" /></th>
                 <th className={thClass} onClick={() => handleSort('rankTrend')} title="MLB Pipeline rank change since preseason (▲ = rising)">Trend <SortIcon field="rankTrend" /></th>
@@ -412,7 +513,38 @@ export default function ProspectsPage() {
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
               {filteredProspects.slice(0, 200).map((p, i) => (
-                <tr key={`${p.playerId}-${i}`} className={`hover:bg-gray-50 dark:hover:bg-gray-700 ${p.isAvailable ? 'bg-green-50 dark:bg-green-900/20' : ''}`}>
+                <tr
+                  key={`${p.playerId}-${i}`}
+                  className={`hover:bg-gray-50 dark:hover:bg-gray-700 ${
+                    p.isMine
+                      ? 'bg-blue-50 dark:bg-blue-900/30 border-l-4 border-blue-500'
+                      : p.isAvailable
+                        ? 'bg-green-50 dark:bg-green-900/20'
+                        : ''
+                  }`}
+                >
+                  <td className="px-3 py-2 text-sm">
+                    {p.score === null ? (
+                      <span className="text-gray-400 dark:text-gray-500">—</span>
+                    ) : (
+                      <span
+                        className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-bold tabular-nums ${scoreBadgeColor(p.score)}`}
+                        title={scoreTooltip(p.scoreParts)}
+                      >
+                        {p.score.toFixed(0)}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-sm tabular-nums">
+                    {p.scoreParts === null ? (
+                      <span className="text-gray-400 dark:text-gray-500">—</span>
+                    ) : (
+                      <span className={p.scoreParts.perf >= 75 ? 'text-green-600 dark:text-green-400 font-medium' : 'text-gray-600 dark:text-gray-400'}>
+                        {p.scoreParts.perf.toFixed(0)}
+                        {p.scoreParts.unranked && <span className="ml-1 text-xs text-gray-400 dark:text-gray-500" title="No scouting coverage — scored on performance and ETA alone">*</span>}
+                      </span>
+                    )}
+                  </td>
                   <td className="px-3 py-2 text-sm text-gray-900 dark:text-white">{p.hkbRank ?? '—'}</td>
                   <td className="px-3 py-2 text-sm text-gray-900 dark:text-white tabular-nums font-medium">{p.mlbRank ?? '—'}</td>
                   <td className="px-3 py-2 text-sm tabular-nums whitespace-nowrap">
